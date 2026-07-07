@@ -14,6 +14,8 @@ import type { BuildingType, UnitPrices } from "./engine/data";
 import { autoColumns, computeEstimate, formatNaira } from "./engine/estimate";
 import type { EstimateInput } from "./engine/estimate";
 import { exportEstimatePdf } from "./engine/pdf";
+import { computeTimeline, totalWeeks } from "./engine/timeline";
+import { extractPlan } from "./engine/plan";
 
 interface SavedEstimate {
   id: string;
@@ -48,7 +50,7 @@ function hasCustomPrices(): boolean {
   return localStorage.getItem(PRICES_CUSTOM_KEY) === "1";
 }
 
-type Tab = "estimate" | "prices" | "history";
+type Tab = "estimate" | "timeline" | "prices" | "history";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("estimate");
@@ -79,6 +81,7 @@ export default function App() {
   const [currency, setCurrency] = useState<string>("NGN");
   const [history, setHistory] = useState<SavedEstimate[]>(loadHistory());
   const [openTrades, setOpenTrades] = useState(true);
+  const [planStatus, setPlanStatus] = useState("");
 
   useEffect(() => {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
@@ -232,6 +235,28 @@ export default function App() {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
   }
 
+  async function onPlanFile(file: File | undefined) {
+    if (!file) return;
+    setPlanStatus("Reading plan…");
+    try {
+      const p = await extractPlan(file);
+      if (!p.areaSqm && !p.lengthM) {
+        setPlanStatus("Couldn't detect an area on the plan — please enter it manually.");
+        return;
+      }
+      if (p.areaSqm) setFloorArea(String(p.areaSqm));
+      if (p.lengthM) setLength(String(p.lengthM));
+      if (p.widthM) setWidth(String(p.widthM));
+      setPlanStatus(
+        `Detected${p.areaSqm ? ` area ${p.areaSqm} sqm` : ""}${p.lengthM ? ` · ${p.lengthM}m × ${p.widthM}m` : ""} — review below.`,
+      );
+    } catch (e) {
+      setPlanStatus(e instanceof Error ? e.message : "Could not read that file.");
+    }
+  }
+
+  const timeline = useMemo(() => computeTimeline(storeys, stages), [storeys, stages]);
+
   const topTrade = result
     ? [...result.trades].sort((a, b) => b.total - a.total)[0]
     : null;
@@ -273,6 +298,21 @@ export default function App() {
                 </div>
               </section>
             )}
+
+            <section className="card">
+              <h2>📐 Architectural Plan Upload</h2>
+              <p className="hint">Upload a floor plan PDF — we'll auto-detect the floor area and dimensions.</p>
+              <label className="upload-box">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => onPlanFile(e.target.files?.[0])}
+                  hidden
+                />
+                📄 Tap to choose a PDF floor plan
+              </label>
+              {planStatus && <p className="hint">{planStatus}</p>}
+            </section>
 
             <section className="card">
               <h2>🏛️ Building Overview</h2>
@@ -606,6 +646,39 @@ export default function App() {
           </>
         )}
 
+        {tab === "timeline" && (
+          <section className="card">
+            <h2>📅 Construction Timeline</h2>
+            <p className="hint">
+              Indicative programme for {storeys === 0 ? "a bungalow" : `${storeys} storey${storeys > 1 ? "s" : ""}`} · selected
+              scope · ~{totalWeeks(timeline)} weeks (≈{Math.ceil(totalWeeks(timeline) / 4.33)} months).
+            </p>
+            <div className="gantt">
+              {timeline.map((p) => (
+                <div className="gantt-row" key={p.key}>
+                  <div className="gantt-label">
+                    {p.icon} {p.label}
+                  </div>
+                  <div className="gantt-track">
+                    <div
+                      className="gantt-bar"
+                      style={{
+                        left: `${(p.startWeek / totalWeeks(timeline)) * 100}%`,
+                        width: `${(p.weeks / totalWeeks(timeline)) * 100}%`,
+                      }}
+                    >
+                      {p.weeks}w
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="hint">
+              Weeks are indicative for steady funding and normal weather; adjust for cash flow and rainy season.
+            </p>
+          </section>
+        )}
+
         {tab === "prices" && (
           <section className="card">
             <h2>⚙️ Unit Prices (₦)</h2>
@@ -674,6 +747,9 @@ export default function App() {
       <nav className="tabbar">
         <button className={tab === "estimate" ? "on" : ""} onClick={() => setTab("estimate")}>
           🏗️<span>Estimate</span>
+        </button>
+        <button className={tab === "timeline" ? "on" : ""} onClick={() => setTab("timeline")}>
+          📅<span>Timeline</span>
         </button>
         <button className={tab === "prices" ? "on" : ""} onClick={() => setTab("prices")}>
           ⚙️<span>Prices</span>

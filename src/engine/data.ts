@@ -129,6 +129,14 @@ export const SITE_ADDONS: SiteAddon[] = [
   { key: "solar", label: "Solar + Inverter Backup", icon: "☀️", material: 3800000, labour: 420000, hint: "5kVA hybrid inverter, panels & lithium battery" },
 ];
 
+// Swimming pool (reinforced concrete shell, tiling, pump & filtration), ₦
+export const POOL_SIZES = [
+  { value: "", label: "No swimming pool" },
+  { value: "small", label: "Small (~6m × 3m)", material: 4500000, labour: 2500000 },
+  { value: "medium", label: "Medium (~8m × 4m)", material: 7500000, labour: 3500000 },
+  { value: "large", label: "Large (~12m × 6m)", material: 13000000, labour: 5500000 },
+] as const;
+
 // Genset supply cost scales with built area
 export const gensetCost = (builtArea: number) =>
   builtArea <= 250 ? 2500000 : builtArea <= 600 ? 4500000 : 7500000;

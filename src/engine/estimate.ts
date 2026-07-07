@@ -7,6 +7,7 @@ import {
   LABOUR_RATES,
   MATERIAL_FACTORS,
   PAYMENT_SCHEDULE,
+  POOL_SIZES,
   ROOF_TYPES,
   SCAFFOLDING_TYPES,
   SERVICE_RATES,
@@ -41,6 +42,7 @@ export interface EstimateInput {
   roofingMaterial?: string; // "tiles" or an aluminium gauge like "0.55mm"
   includeWaterTank?: boolean; // MEP add-on: overhead tank stand
   siteAddons?: string[]; // keys from SITE_ADDONS
+  poolSize?: string; // "" | "small" | "medium" | "large"
   contingencyPct?: number; // inflation / price-volatility buffer
   admin?: AdminSettings;
 }
@@ -299,6 +301,20 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
       material: round(material * regionMult),
       labour: round(labour * regionMult),
       total: round(material * regionMult) + round(labour * regionMult),
+    });
+  }
+
+  const pool = POOL_SIZES.find((p) => p.value === input.poolSize && p.value !== "");
+  if (pool && "material" in pool) {
+    const material = round(pool.material * regionMult);
+    const labour = round(pool.labour * regionMult);
+    trades.push({
+      key: "pool",
+      label: `Swimming Pool (${pool.label})`,
+      icon: "🏊",
+      material,
+      labour,
+      total: material + labour,
     });
   }
 

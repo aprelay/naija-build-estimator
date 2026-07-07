@@ -5,6 +5,7 @@ import {
   FORMWORK_TYPES,
   FOUNDATION_TYPES,
   FX_RATES,
+  POOL_SIZES,
   ROOF_TYPES,
   SCAFFOLDING_TYPES,
   SITE_ADDONS,
@@ -111,6 +112,7 @@ export default function App() {
   const [roofingMaterial, setRoofingMaterial] = useState("");
   const [includeWaterTank, setIncludeWaterTank] = useState(false);
   const [siteAddons, setSiteAddons] = useState<string[]>([]);
+  const [poolSize, setPoolSize] = useState("");
   const [contingencyPct, setContingencyPct] = useState("10");
   const [branding, setBranding] = useState(loadBranding());
   const [publishState, setPublishState] = useState("");
@@ -199,13 +201,14 @@ export default function App() {
       roofingMaterial: roofingMaterial || undefined,
       includeWaterTank,
       siteAddons,
+      poolSize,
       contingencyPct: parseFloat(contingencyPct) || 0,
       admin: adminSettings,
     }),
     [buildingType, subtype, area, storeys, columns, state, blockPrice, stages, prices,
       length, width, roofType, foundationType, formwork, scaffolding,
       columnHeight, columnWidthMm, columnDepthMm, roofingMaterial, includeWaterTank,
-      siteAddons, contingencyPct, adminSettings],
+      siteAddons, poolSize, contingencyPct, adminSettings],
   );
 
   const result = useMemo(() => (area > 0 ? computeEstimate(input) : null), [input, area]);
@@ -295,8 +298,9 @@ export default function App() {
       if (p.areaSqm) setFloorArea(String(p.areaSqm));
       if (p.lengthM) setLength(String(p.lengthM));
       if (p.widthM) setWidth(String(p.widthM));
+      if (p.hasPool && !poolSize) setPoolSize("medium");
       setPlanStatus(
-        `Detected${p.areaSqm ? ` area ${p.areaSqm} sqm` : ""}${p.lengthM ? ` · ${p.lengthM}m × ${p.widthM}m` : ""} — review below.`,
+        `Detected${p.areaSqm ? ` area ${p.areaSqm} sqm` : ""}${p.lengthM ? ` · ${p.lengthM}m × ${p.widthM}m` : ""}${p.hasPool ? " · 🏊 pool on plan (added — adjust size below)" : ""} — review below.`,
       );
     } catch (e) {
       setPlanStatus(e instanceof Error ? e.message : "Could not read that file.");
@@ -606,6 +610,15 @@ export default function App() {
                   </div>
                 </label>
               ))}
+              <div className="field">
+                <label>🏊 Swimming Pool</label>
+                <select value={poolSize} onChange={(e) => setPoolSize(e.target.value)}>
+                  {POOL_SIZES.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                <small>Reinforced concrete shell, tiling, pump & filtration — auto-suggested when a pool is on the uploaded plan.</small>
+              </div>
               <div className="field">
                 <label>Contingency / Inflation Buffer (%)</label>
                 <input

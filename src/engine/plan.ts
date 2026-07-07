@@ -8,6 +8,7 @@ export interface PlanExtraction {
   areaSqm: number | null;
   lengthM: number | null;
   widthM: number | null;
+  hasPool: boolean;
 }
 
 const num = (s: string) => parseFloat(s.replace(/,/g, ""));
@@ -45,6 +46,8 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   // CAD exports often emit the ² superscript as a separate glyph: "33.458 m 2"
   text = text.replace(/m\s*(?:²|2)(?![\d.])/gi, "m2");
 
+  const hasPool = /swimming\s*pool|\bpool\b/i.test(text);
+
   // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport) or "TOTAL 2302 SF"
   const FT_UNIT = String.raw`(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f|s\.?f\.?\b)`;
   const sqftMatch =
@@ -53,7 +56,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     text.match(new RegExp(String.raw`([\d,]{2,9}(?:\.\d{1,2})?)\s*${FT_UNIT}`, "i"));
   if (sqftMatch) {
     const areaSqm = Math.round(num(sqftMatch[1]) * SQFT_TO_SQM);
-    if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null };
+    if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null, hasPool };
   }
 
   // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"
@@ -81,5 +84,5 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   }
   if (!areaSqm && lengthM && widthM) areaSqm = Math.round(lengthM * widthM);
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
-  return { areaSqm, lengthM, widthM };
+  return { areaSqm, lengthM, widthM, hasPool };
 }

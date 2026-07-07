@@ -42,6 +42,9 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     }
   }
 
+  // CAD exports often emit the ² superscript as a separate glyph: "33.458 m 2"
+  text = text.replace(/m\s*(?:²|2)(?![\d.])/gi, "m2");
+
   // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport) or "TOTAL 2302 SF"
   const FT_UNIT = String.raw`(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f|s\.?f\.?\b)`;
   const sqftMatch =
@@ -56,7 +59,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"
   const areaMatch = text.match(
     /(?:total|floor|plan|gross|built|site)?\s*area[^0-9]{0,12}([\d,]{2,7}(?:\.\d{1,2})?)\s*(?:sq\.?\s*m|sqm|m²|m2|square met)/i,
-  ) ?? text.match(/([\d,]{2,7}(?:\.\d{1,2})?)\s*(?:sqm|m²|m2)\b/i);
+  ) ?? text.match(/(?<![\d.,])(\d[\d,]{1,6}(?:\.\d{1,2})?)\s*(?:sqm|m²|m2)\b/i);
 
   // e.g. "20m x 15m", "20.5 × 15"
   const dimMatch = text.match(
@@ -67,6 +70,14 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   const lengthM = dimMatch ? num(dimMatch[1]) : null;
   const widthM = dimMatch ? num(dimMatch[2]) : null;
   if (!areaSqm && lengthM && widthM) areaSqm = Math.round(lengthM * widthM);
+
+  // No stated total — sum per-room areas (e.g. ArchiCAD room stamps "33.458 m2")
+  if (!areaSqm) {
+    const rooms = (text.match(/\d{1,4}(?:\.\d{1,3})?\s*(?:m2|sqm)\b/gi) ?? [])
+      .map((r) => parseFloat(r))
+      .filter((v) => v >= 1 && v <= 500);
+    if (rooms.length >= 3) areaSqm = Math.round(rooms.reduce((s, v) => s + v, 0));
+  }
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
   return { areaSqm, lengthM, widthM };
 }

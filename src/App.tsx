@@ -16,6 +16,9 @@ import type { EstimateInput } from "./engine/estimate";
 import { exportEstimatePdf } from "./engine/pdf";
 import { computeTimeline, totalWeeks } from "./engine/timeline";
 import { extractPlan } from "./engine/plan";
+import { loadAdminSettings } from "./engine/admin";
+import type { AdminSettings } from "./engine/admin";
+import AdminPanel from "./AdminPanel";
 
 interface SavedEstimate {
   id: string;
@@ -93,6 +96,9 @@ export default function App() {
   const [openTrades, setOpenTrades] = useState(true);
   const [planStatus, setPlanStatus] = useState("");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => loadAdminSettings());
+  const [roofingMaterial, setRoofingMaterial] = useState("");
+  const [includeWaterTank, setIncludeWaterTank] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
@@ -165,10 +171,13 @@ export default function App() {
       columnHeight: parseFloat(columnHeight) || 0,
       columnWidthMm: parseFloat(columnWidthMm) || 0,
       columnDepthMm: parseFloat(columnDepthMm) || 0,
+      roofingMaterial: roofingMaterial || undefined,
+      includeWaterTank,
+      admin: adminSettings,
     }),
     [buildingType, subtype, area, storeys, columns, state, blockPrice, stages, prices,
       length, width, roofType, foundationType, formwork, scaffolding,
-      columnHeight, columnWidthMm, columnDepthMm],
+      columnHeight, columnWidthMm, columnDepthMm, roofingMaterial, includeWaterTank, adminSettings],
   );
 
   const result = useMemo(() => (area > 0 ? computeEstimate(input) : null), [input, area]);
@@ -484,6 +493,26 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+                <div className="field">
+                  <label>Roofing Material</label>
+                  <select value={roofingMaterial} onChange={(e) => setRoofingMaterial(e.target.value)}>
+                    <option value="">Default Sheet · ₦{prices.roofingSheet.toLocaleString()}/m²</option>
+                    {Object.entries(adminSettings.roofing.gauges).map(([g, rate]) => (
+                      <option key={g} value={g}>Aluminium {g} · ₦{rate.toLocaleString()}/m²</option>
+                    ))}
+                    <option value="tiles">Roof Tiles · ₦{adminSettings.roofing.tiles.toLocaleString()}/m²</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <label className="stage-inline">
+                  <input
+                    type="checkbox"
+                    checked={includeWaterTank}
+                    onChange={(e) => setIncludeWaterTank(e.target.checked)}
+                  />
+                  💧 Include overhead water tank stand (MEP add-on)
+                </label>
               </div>
               <div className="field">
                 <label>Block Type</label>
@@ -760,6 +789,8 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {tab === "prices" && <AdminPanel settings={adminSettings} onChange={setAdminSettings} />}
 
         {tab === "history" && (
           <section className="card">

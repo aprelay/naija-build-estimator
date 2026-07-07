@@ -14,6 +14,8 @@ import {
   STATE_MULTIPLIERS,
 } from "./data";
 import type { BuildingType, UnitPrices } from "./data";
+import { DEFAULT_ADMIN, excavationCost, tankStandCost } from "./admin";
+import type { AdminSettings } from "./admin";
 
 export interface EstimateInput {
   buildingType: BuildingType;
@@ -34,6 +36,9 @@ export interface EstimateInput {
   columnHeight?: number; // m per storey
   columnWidthMm?: number;
   columnDepthMm?: number;
+  roofingMaterial?: string; // "tiles" or an aluminium gauge like "0.55mm"
+  includeWaterTank?: boolean; // MEP add-on: overhead tank stand
+  admin?: AdminSettings;
 }
 
 export interface EstimateResult {
@@ -72,6 +77,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
     stages,
     prices,
   } = input;
+  const admin = input.admin ?? DEFAULT_ADMIN;
 
   const floors = Math.max(1, storeys + (storeys === 0 ? 1 : 0)); // bungalow counts as 1 floor
   const builtArea = floorArea * floors;
@@ -130,7 +136,14 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
   const concreteMaterial = cementBags * prices.cement + sandTrips * prices.sand + graniteTrips * prices.granite;
   const steelMaterial = steelTonnes * prices.steel;
   const blockworkMaterial = blocks * blockPrice;
-  const roofingMaterial = roofAreaM2 * prices.roofingSheet * 1.4 * roofMult; // sheets + fasteners + timber
+  const roofSheetRate =
+    input.roofingMaterial === "tiles"
+      ? admin.roofing.tiles
+      : input.roofingMaterial && admin.roofing.gauges[input.roofingMaterial] !== undefined
+        ? admin.roofing.gauges[input.roofingMaterial]
+        : prices.roofingSheet;
+  const roofAccessories = roofAreaM2 * (admin.roofing.nails + admin.roofing.sealant);
+  const roofingMaterial = roofAreaM2 * roofSheetRate * 1.25 * roofMult + roofAccessories;
   const timberMaterial =
     builtArea * formworkRate * 0.35 + wallAreaM2 * scaffoldRate * (floors > 1 ? 0.5 : 0.15);
   const sr = SERVICE_RATES[buildingType];
@@ -140,13 +153,15 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
 
   const l = LABOUR_RATES;
 
+  const exc = excavationCost(admin.excavation, columns, floorArea, state);
+
   const trades = [
     {
       key: "excavation",
       label: "Excavation & Earthworks",
       icon: "🚧",
-      material: floorArea * 2500 * foundationMult,
-      labour: floorArea * 1800 * foundationMult,
+      material: (floorArea * 1500 + exc.compactionWater) * foundationMult,
+      labour: (exc.trench + exc.bases + floorArea * 1200) * foundationMult,
     },
     {
       key: "concrete",
@@ -224,6 +239,31 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
     return { ...t, material, labour, total: material + labour };
   });
 
+  // Concrete grade adjustment: cement demand of the selected grade vs Grade 20 baseline.
+  const gradeKey = admin.stageGrades[stages.includes("full") || stages.length === 0 ? "full" : stages[0]] ?? "grade25";
+  const grade = admin.grades[gradeKey];
+  const gradeMult = grade.cementBags / admin.grades.grade20.cementBags;
+  const concreteTrade = trades.find((t) => t.key === "concrete");
+  if (concreteTrade && gradeMult !== 1) {
+    concreteTrade.material = round(concreteTrade.material * gradeMult);
+    concreteTrade.total = concreteTrade.material + concreteTrade.labour;
+  }
+
+  // Overhead water tank stand (MEP add-on)
+  if (input.includeWaterTank && (stages.includes("mep") || stages.includes("full") || stages.length === 0)) {
+    const tank = tankStandCost(admin.tank, storeys);
+    const material = round(tank.material * regionMult);
+    const labour = round(tank.labour * regionMult);
+    trades.push({
+      key: "watertank",
+      label: "Overhead Water Tank Stand",
+      icon: "💧",
+      material,
+      labour,
+      total: material + labour,
+    });
+  }
+
   // Fencing is an add-on stage costed from the site boundary, not prorated.
   if (stages.includes("fencing")) {
     const fenceLen = perimeter * 1.6;
@@ -239,11 +279,13 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
     });
   }
 
-  const total = trades.reduce((s, t) => s + t.total, 0);
+  const visibleTrades = trades.filter((t) => !admin.hiddenTrades.includes(t.key));
+  const total = visibleTrades.reduce((s, t) => s + t.total, 0);
 
   const fullBuildTotal =
     stageFactor > 0
-      ? trades.filter((t) => t.key !== "fencing").reduce((s, t) => s + t.total, 0) / stageFactor
+      ? visibleTrades.filter((t) => t.key !== "fencing" && t.key !== "watertank").reduce((s, t) => s + t.total, 0) /
+        stageFactor
       : 0;
   const stageBreakdown = STAGES.filter((s) => !s.addon && s.key !== "full").map((s) => ({
     key: s.key,
@@ -268,7 +310,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
 
   return {
     total,
-    trades,
+    trades: visibleTrades,
     quantities: {
       cementBags: Math.ceil(cementBags * stageFactor),
       steelTonnes: parseFloat((steelTonnes * stageFactor).toFixed(2)),

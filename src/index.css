@@ -265,6 +265,27 @@ select:focus {
   gap: 12px;
 }
 
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border, #eee);
+  font-size: 14px;
+}
+
+.stage-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stage-inline input {
+  width: auto;
+}
+
 .block-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;

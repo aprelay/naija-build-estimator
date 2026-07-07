@@ -11,6 +11,7 @@ import {
   SITE_ADDONS,
   STAGES,
   STATES,
+  STATE_SOIL,
   SUBTYPES,
 } from "./engine/data";
 import type { BuildingType, UnitPrices } from "./engine/data";
@@ -235,6 +236,12 @@ export default function App() {
     const first = SUBTYPES[t][0];
     setSubtype(first.value);
     setStoreys(first.storeys);
+  }
+
+  function onSelectState(v: string) {
+    setState(v);
+    const soil = STATE_SOIL[v];
+    if (soil) setFoundationType(soil.foundation);
   }
 
   function onSelectSubtype(v: string) {
@@ -481,9 +488,12 @@ export default function App() {
                   <label>Foundation Type</label>
                   <select value={foundationType} onChange={(e) => setFoundationType(e.target.value)}>
                     {FOUNDATION_TYPES.map((r) => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
+                      <option key={r.value} value={r.value}>
+                        {r.label}{STATE_SOIL[state]?.foundation === r.value ? " ★ recommended" : ""}
+                      </option>
                     ))}
                   </select>
+                  {STATE_SOIL[state] && <small>{STATE_SOIL[state].note}</small>}
                 </div>
               </div>
               <div className="grid2">
@@ -499,13 +509,14 @@ export default function App() {
                 </div>
                 <div className="field">
                   <label>State</label>
-                  <select value={state} onChange={(e) => setState(e.target.value)}>
+                  <select value={state} onChange={(e) => onSelectState(e.target.value)}>
                     {STATES.map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>
                     ))}
                   </select>
+                  {STATE_SOIL[state] && <small>🧱 {STATE_SOIL[state].soil}</small>}
                 </div>
               </div>
               <div className="subhead">🏛️ Column Schedule — feeds concrete & steel</div>

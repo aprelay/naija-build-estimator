@@ -209,6 +209,53 @@ export const STATE_MULTIPLIERS: Record<string, number> = {
 
 export const STATES = Object.keys(STATE_MULTIPLIERS).sort();
 
+// Typical soil condition per state and the foundation type usually suited to it.
+// Indicative only — a geotechnical survey should confirm the actual soil bearing capacity.
+export interface SoilProfile {
+  soil: string;
+  foundation: string; // value from FOUNDATION_TYPES
+  note: string;
+}
+
+const SWAMP: SoilProfile = {
+  soil: "Swampy / waterlogged coastal soil",
+  foundation: "raft_hardcore",
+  note: "Coastal lowlands with high water table — raft (or pile for storeys) spreads the load; strip footings risk settlement.",
+};
+const FIRM: SoilProfile = {
+  soil: "Firm laterite / sandy clay",
+  foundation: "strip_pad",
+  note: "Good bearing capacity — standard strip/pad foundation is usually adequate.",
+};
+const EXPANSIVE: SoilProfile = {
+  soil: "Expansive clay (shrink–swell)",
+  foundation: "raft_hardcore",
+  note: "Clay swells in rainy season and shrinks in dry season — raft on hardcore resists differential movement.",
+};
+
+export const STATE_SOIL: Record<string, SoilProfile> = {
+  Lagos: SWAMP,
+  Rivers: SWAMP,
+  "Akwa Ibom": SWAMP,
+  Delta: SWAMP,
+  "Cross River": { ...FIRM, note: "Mostly firm ground; riverine areas near Calabar may need raft — confirm with a soil test." },
+  "FCT Abuja": FIRM,
+  Ogun: FIRM,
+  Oyo: FIRM,
+  Osun: FIRM,
+  Ondo: FIRM,
+  Edo: FIRM,
+  Kwara: FIRM,
+  Kaduna: FIRM,
+  Plateau: FIRM,
+  Enugu: EXPANSIVE,
+  Anambra: { ...EXPANSIVE, note: "Erosion-prone expansive soils in parts — raft on hardcore recommended; avoid building near gully areas." },
+  Abia: EXPANSIVE,
+  Kano: FIRM,
+  Sokoto: FIRM,
+  Borno: FIRM,
+};
+
 // Construction stages with completion factor (share of a full build).
 export interface Stage {
   key: string;

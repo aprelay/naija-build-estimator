@@ -52,6 +52,16 @@ function hasCustomPrices(): boolean {
 
 type Tab = "estimate" | "timeline" | "prices" | "history";
 
+function addWeeks(dateStr: string, weeks: number): Date {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + Math.round(weeks * 7));
+  return d;
+}
+
+function fmtDate(d: Date): string {
+  return d.toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("estimate");
   const [buildingType, setBuildingType] = useState<BuildingType>("residential");
@@ -82,6 +92,7 @@ export default function App() {
   const [history, setHistory] = useState<SavedEstimate[]>(loadHistory());
   const [openTrades, setOpenTrades] = useState(true);
   const [planStatus, setPlanStatus] = useState("");
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
@@ -649,10 +660,15 @@ export default function App() {
         {tab === "timeline" && (
           <section className="card">
             <h2>📅 Construction Timeline</h2>
-            <p className="hint">
-              Indicative programme for {storeys === 0 ? "a bungalow" : `${storeys} storey${storeys > 1 ? "s" : ""}`} · selected
-              scope · ~{totalWeeks(timeline)} weeks (≈{Math.ceil(totalWeeks(timeline) / 4.33)} months).
-            </p>
+            <div className="timeline-hero">
+              <div className="hint">ESTIMATED PROJECT DURATION</div>
+              <div className="timeline-duration">{totalWeeks(timeline)} weeks</div>
+              <div className="hint">≈{(totalWeeks(timeline) / 4.33).toFixed(1)} months · {storeys === 0 ? "bungalow" : `${storeys} storey${storeys > 1 ? "s" : ""}`} · completion {fmtDate(addWeeks(startDate, totalWeeks(timeline)))}</div>
+            </div>
+            <div className="field">
+              <label>Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
             <div className="gantt">
               {timeline.map((p) => (
                 <div className="gantt-row" key={p.key}>
@@ -670,11 +686,34 @@ export default function App() {
                       {p.weeks}w
                     </div>
                   </div>
+                  <div className="gantt-dates">
+                    {fmtDate(addWeeks(startDate, p.startWeek))} → {fmtDate(addWeeks(startDate, p.startWeek + p.weeks))}
+                  </div>
                 </div>
               ))}
             </div>
+            <h2>📋 Phase Summary</h2>
+            <table className="trades">
+              <thead>
+                <tr><th>Phase</th><th>Weeks</th><th>End Date</th></tr>
+              </thead>
+              <tbody>
+                {timeline.map((p) => (
+                  <tr key={p.key}>
+                    <td>{p.icon} {p.label}</td>
+                    <td>{p.weeks}</td>
+                    <td>{fmtDate(addWeeks(startDate, p.startWeek + p.weeks))}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className="strong">TOTAL</td>
+                  <td className="strong">{totalWeeks(timeline)}</td>
+                  <td className="strong">{fmtDate(addWeeks(startDate, totalWeeks(timeline)))}</td>
+                </tr>
+              </tbody>
+            </table>
             <p className="hint">
-              Weeks are indicative for steady funding and normal weather; adjust for cash flow and rainy season.
+              Indicative for steady funding and normal weather — phases may overlap in practice. Allow buffer for permits, procurement and rainy season.
             </p>
           </section>
         )}

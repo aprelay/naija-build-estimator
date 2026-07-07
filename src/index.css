@@ -101,6 +101,42 @@ body {
   margin-bottom: 12px;
 }
 
+.subhead {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d4d4d8);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chip.active {
+  background: #6d28d9;
+  border-color: #6d28d9;
+  color: #fff;
+}
+
 .admin-box {
   margin-top: 20px;
   padding: 14px;

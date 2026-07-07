@@ -79,6 +79,48 @@ export const SERVICE_RATES = {
   commercial: { electrical: 14500, plumbing: 10500, finishing: 28000 },
 } as const;
 
+export interface OptionRate {
+  value: string;
+  label: string;
+  mult?: number;
+  ratePerM2?: number;
+}
+
+export const ROOF_TYPES: OptionRate[] = [
+  { value: "pitched_gable", label: "Pitched Roof (Gable)", mult: 1 },
+  { value: "shed_roof", label: "Shed Roof", mult: 0.85 },
+  { value: "concrete_roof", label: "Concrete Roof Slab", mult: 1.35 },
+];
+
+export const FOUNDATION_TYPES: OptionRate[] = [
+  { value: "strip_pad", label: "Strip / Pad Foundation", mult: 1 },
+  { value: "raft_hardcore", label: "Raft / Hardcore Foundation", mult: 1.25 },
+  { value: "pile", label: "Pile Foundation", mult: 1.8 },
+];
+
+export const FORMWORK_TYPES: OptionRate[] = [
+  { value: "marine_board", label: "Marine Board", ratePerM2: 4500 },
+  { value: "ordinary_planks", label: "Ordinary Planks", ratePerM2: 2800 },
+];
+
+export const SCAFFOLDING_TYPES: OptionRate[] = [
+  { value: "bamboo", label: "Bamboo", ratePerM2: 800 },
+  { value: "metal_scaffold", label: "Metal Scaffold", ratePerM2: 1500 },
+];
+
+// Boundary fencing (2.4m block wall with pillars), ₦ per linear metre
+export const FENCING_RATES = { materialPerM: 38000, labourPerM: 9000 };
+
+export const HAULAGE_PER_TRIP = 45000; // ₦ per delivery trip (state-adjusted)
+
+export const PAYMENT_SCHEDULE: { label: string; pct: number }[] = [
+  { label: "Mobilization & site setup", pct: 0.3 },
+  { label: "Foundation complete", pct: 0.25 },
+  { label: "Superstructure & roof", pct: 0.25 },
+  { label: "MEP & finishes", pct: 0.15 },
+  { label: "Retention (on handover)", pct: 0.05 },
+];
+
 export const BUILDING_TYPE_MULTIPLIERS: Record<BuildingType, number> = {
   residential: 1,
   commercial: 1.35,
@@ -134,9 +176,17 @@ export interface Stage {
   label: string;
   description: string;
   factor: number; // 0..1 share of full build cost
+  addon?: boolean; // costed separately, not a share of the build
 }
 
 export const STAGES: Stage[] = [
+  {
+    key: "fencing",
+    label: "Fencing",
+    description: "Site boundary fencing — block wall with reinforced pillars.",
+    factor: 0,
+    addon: true,
+  },
   {
     key: "foundation",
     label: "Foundation → Ground Floor Slab",

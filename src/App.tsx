@@ -1,7 +1,11 @@
 import { useMemo, useState, useEffect } from "react";
 import {
   DEFAULT_PRICES,
+  FORMWORK_TYPES,
+  FOUNDATION_TYPES,
   FX_RATES,
+  ROOF_TYPES,
+  SCAFFOLDING_TYPES,
   STAGES,
   STATES,
   SUBTYPES,
@@ -53,6 +57,16 @@ export default function App() {
   const [floorArea, setFloorArea] = useState("");
   const [storeys, setStoreys] = useState(0);
   const [columns, setColumns] = useState("");
+  const [length, setLength] = useState("");
+  const [width, setWidth] = useState("");
+  const [roofType, setRoofType] = useState("pitched_gable");
+  const [foundationType, setFoundationType] = useState("strip_pad");
+  const [formwork, setFormwork] = useState("marine_board");
+  const [scaffolding, setScaffolding] = useState("bamboo");
+  const [columnHeight, setColumnHeight] = useState("");
+  const [columnWidthMm, setColumnWidthMm] = useState("");
+  const [columnDepthMm, setColumnDepthMm] = useState("");
+  const [tradeFilter, setTradeFilter] = useState("all");
   const [state, setState] = useState("Lagos");
   const [blockPrice, setBlockPrice] = useState(750);
   const [stages, setStages] = useState<string[]>(["full"]);
@@ -128,8 +142,19 @@ export default function App() {
       blockPrice,
       stages,
       prices,
+      length: parseFloat(length) || 0,
+      width: parseFloat(width) || 0,
+      roofType,
+      foundationType,
+      formwork,
+      scaffolding,
+      columnHeight: parseFloat(columnHeight) || 0,
+      columnWidthMm: parseFloat(columnWidthMm) || 0,
+      columnDepthMm: parseFloat(columnDepthMm) || 0,
     }),
-    [buildingType, subtype, area, storeys, columns, state, blockPrice, stages, prices],
+    [buildingType, subtype, area, storeys, columns, state, blockPrice, stages, prices,
+      length, width, roofType, foundationType, formwork, scaffolding,
+      columnHeight, columnWidthMm, columnDepthMm],
   );
 
   const result = useMemo(() => (area > 0 ? computeEstimate(input) : null), [input, area]);
@@ -188,6 +213,15 @@ export default function App() {
     setState(i.state);
     setBlockPrice(i.blockPrice);
     setStages(i.stages);
+    setLength(i.length ? String(i.length) : "");
+    setWidth(i.width ? String(i.width) : "");
+    setRoofType(i.roofType || "pitched_gable");
+    setFoundationType(i.foundationType || "strip_pad");
+    setFormwork(i.formwork || "marine_board");
+    setScaffolding(i.scaffolding || "bamboo");
+    setColumnHeight(i.columnHeight ? String(i.columnHeight) : "");
+    setColumnWidthMm(i.columnWidthMm ? String(i.columnWidthMm) : "");
+    setColumnDepthMm(i.columnDepthMm ? String(i.columnDepthMm) : "");
     setProjectName(e.projectName);
     setTab("estimate");
   }
@@ -293,6 +327,44 @@ export default function App() {
               </div>
               <div className="grid2">
                 <div className="field">
+                  <label>Building Length (m)</label>
+                  <input
+                    type="number"
+                    value={length}
+                    onChange={(e) => setLength(e.target.value)}
+                    placeholder="e.g. 20 (optional)"
+                  />
+                </div>
+                <div className="field">
+                  <label>Building Width (m)</label>
+                  <input
+                    type="number"
+                    value={width}
+                    onChange={(e) => setWidth(e.target.value)}
+                    placeholder="e.g. 15 (optional)"
+                  />
+                </div>
+              </div>
+              <div className="grid2">
+                <div className="field">
+                  <label>Roof Type</label>
+                  <select value={roofType} onChange={(e) => setRoofType(e.target.value)}>
+                    {ROOF_TYPES.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Foundation Type</label>
+                  <select value={foundationType} onChange={(e) => setFoundationType(e.target.value)}>
+                    {FOUNDATION_TYPES.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid2">
+                <div className="field">
                   <label>No. of Columns</label>
                   <input
                     type="number"
@@ -309,6 +381,55 @@ export default function App() {
                       <option key={s} value={s}>
                         {s}
                       </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="subhead">🏛️ Column Schedule — feeds concrete & steel</div>
+              <div className="grid3">
+                <div className="field">
+                  <label>Height / storey (m)</label>
+                  <input
+                    type="number"
+                    value={columnHeight}
+                    onChange={(e) => setColumnHeight(e.target.value)}
+                    placeholder="3.0"
+                  />
+                </div>
+                <div className="field">
+                  <label>Width (mm)</label>
+                  <input
+                    type="number"
+                    value={columnWidthMm}
+                    onChange={(e) => setColumnWidthMm(e.target.value)}
+                    placeholder="300"
+                  />
+                </div>
+                <div className="field">
+                  <label>Depth (mm)</label>
+                  <input
+                    type="number"
+                    value={columnDepthMm}
+                    onChange={(e) => setColumnDepthMm(e.target.value)}
+                    placeholder="300"
+                  />
+                </div>
+              </div>
+              <div className="subhead">🪵 Materials & Preferences — Timber & Woods</div>
+              <div className="grid2">
+                <div className="field">
+                  <label>Formwork Type</label>
+                  <select value={formwork} onChange={(e) => setFormwork(e.target.value)}>
+                    {FORMWORK_TYPES.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Scaffolding Type</label>
+                  <select value={scaffolding} onChange={(e) => setScaffolding(e.target.value)}>
+                    {SCAFFOLDING_TYPES.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                   </select>
                 </div>
@@ -361,6 +482,19 @@ export default function App() {
                   <span>{openTrades ? "▲" : "▼"}</span>
                 </div>
                 {openTrades && (
+                  <div className="chips">
+                    {[{ key: "all", label: "🏗️ All Trades" }, ...result.trades.map((t) => ({ key: t.key, label: `${t.icon} ${t.label.split(" ")[0].replace(/[(),]/g, "")}` }))].map((c) => (
+                      <button
+                        key={c.key}
+                        className={tradeFilter === c.key ? "chip active" : "chip"}
+                        onClick={() => setTradeFilter(c.key)}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {openTrades && (
                   <table className="trades">
                     <thead>
                       <tr>
@@ -371,7 +505,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.trades.map((t) => (
+                      {result.trades.filter((t) => tradeFilter === "all" || t.key === tradeFilter).map((t) => (
                         <tr key={t.key}>
                           <td>
                             {t.icon} {t.label}
@@ -398,6 +532,64 @@ export default function App() {
                   <div><span>Blocks</span><strong>{result.quantities.blocks.toLocaleString()}</strong></div>
                   <div><span>Roof area</span><strong>{result.quantities.roofAreaM2.toLocaleString()} m²</strong></div>
                 </div>
+              </section>
+            )}
+
+            {result && (
+              <section className="card">
+                <h2>🏗️ Stage-by-Stage Cost Breakdown</h2>
+                <p className="hint">Approximate cost of each stage for the full build.</p>
+                <table className="trades">
+                  <tbody>
+                    {result.stageBreakdown.map((s) => (
+                      <tr key={s.key}>
+                        <td>{s.label}</td>
+                        <td className="strong">{convert(s.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            )}
+
+            {result && (
+              <section className="card">
+                <h2>🚛 Transportation & Logistics</h2>
+                <p className="hint">Estimated delivery trips — not included in the total above.</p>
+                <table className="trades">
+                  <tbody>
+                    {result.transport.map((t) => (
+                      <tr key={t.item}>
+                        <td>{t.item}</td>
+                        <td>{t.trips} trip{t.trips !== 1 ? "s" : ""}</td>
+                        <td className="strong">{convert(t.cost)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td className="strong">Logistics total</td>
+                      <td></td>
+                      <td className="strong">{convert(result.transportTotal)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            )}
+
+            {result && (
+              <section className="card">
+                <h2>💳 Payment Terms & Schedule</h2>
+                <p className="hint">Suggested milestone payment plan for the selected scope.</p>
+                <table className="trades">
+                  <tbody>
+                    {result.paymentSchedule.map((p) => (
+                      <tr key={p.label}>
+                        <td>{p.label}</td>
+                        <td>{Math.round(p.pct * 100)}%</td>
+                        <td className="strong">{convert(p.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </section>
             )}
 

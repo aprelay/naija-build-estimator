@@ -1,7 +1,14 @@
 import {
   BUILDING_TYPE_MULTIPLIERS,
+  FENCING_RATES,
+  FORMWORK_TYPES,
+  FOUNDATION_TYPES,
+  HAULAGE_PER_TRIP,
   LABOUR_RATES,
   MATERIAL_FACTORS,
+  PAYMENT_SCHEDULE,
+  ROOF_TYPES,
+  SCAFFOLDING_TYPES,
   SERVICE_RATES,
   STAGES,
   STATE_MULTIPLIERS,
@@ -18,6 +25,15 @@ export interface EstimateInput {
   blockPrice: number;
   stages: string[]; // selected stage keys
   prices: UnitPrices;
+  length?: number; // building length (m), refines perimeter
+  width?: number; // building width (m)
+  roofType?: string;
+  foundationType?: string;
+  formwork?: string;
+  scaffolding?: string;
+  columnHeight?: number; // m per storey
+  columnWidthMm?: number;
+  columnDepthMm?: number;
 }
 
 export interface EstimateResult {
@@ -34,6 +50,10 @@ export interface EstimateResult {
     totalBuiltArea: number;
   };
   stageFactor: number;
+  stageBreakdown: { key: string; label: string; cost: number }[];
+  transport: { item: string; trips: number; cost: number }[];
+  transportTotal: number;
+  paymentSchedule: { label: string; pct: number; amount: number }[];
 }
 
 const round = (n: number) => Math.round(n);
@@ -56,10 +76,18 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
   const floors = Math.max(1, storeys + (storeys === 0 ? 1 : 0)); // bungalow counts as 1 floor
   const builtArea = floorArea * floors;
   const columns = input.columns > 0 ? input.columns : autoColumns(floorArea);
+  const colHeight = input.columnHeight && input.columnHeight > 0 ? input.columnHeight : 3;
+  const colW = (input.columnWidthMm && input.columnWidthMm > 0 ? input.columnWidthMm : 300) / 1000;
+  const colD = (input.columnDepthMm && input.columnDepthMm > 0 ? input.columnDepthMm : 300) / 1000;
 
   const typeMult = BUILDING_TYPE_MULTIPLIERS[buildingType] ?? 1;
   const regionMult = STATE_MULTIPLIERS[state] ?? 1;
   const mult = typeMult * regionMult;
+
+  const roofMult = ROOF_TYPES.find((r) => r.value === input.roofType)?.mult ?? 1;
+  const foundationMult = FOUNDATION_TYPES.find((r) => r.value === input.foundationType)?.mult ?? 1;
+  const formworkRate = FORMWORK_TYPES.find((r) => r.value === input.formwork)?.ratePerM2 ?? 4500;
+  const scaffoldRate = SCAFFOLDING_TYPES.find((r) => r.value === input.scaffolding)?.ratePerM2 ?? 800;
 
   // Stage factor: "full" overrides; otherwise sum of selected factors (capped at 1).
   let stageFactor = 1;
@@ -72,19 +100,26 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
 
   const f = MATERIAL_FACTORS;
 
-  // Wall area estimate: perimeter * height. Approx perimeter from area (square-ish) * 4, height 3m/floor.
-  const perimeter = Math.sqrt(floorArea) * 4 * 1.15;
+  // Wall area estimate: perimeter * height. Use length/width when given, else approx from area.
+  const perimeter =
+    input.length && input.width && input.length > 0 && input.width > 0
+      ? 2 * (input.length + input.width) * 1.15
+      : Math.sqrt(floorArea) * 4 * 1.15;
   const wallAreaM2 = perimeter * 3 * floors * 2.2; // incl. internal partitions
   const roofAreaM2 = floorArea * 1.25; // pitch allowance
 
+  // Column concrete volume from schedule (m3)
+  const columnVolumeM3 = columns * floors * colHeight * colW * colD;
+
   // Quantities
   const cementBags =
-    floorArea * f.cementFoundation +
+    floorArea * f.cementFoundation * foundationMult +
     builtArea * f.cementSlab +
+    columnVolumeM3 * 6.5 +
     wallAreaM2 * f.cementBlockwork +
     wallAreaM2 * f.cementPlaster;
   const steelTonnes =
-    floorArea * f.steelFoundation +
+    floorArea * f.steelFoundation * foundationMult +
     builtArea * f.steelSlabPerFloor +
     columns * floors * f.steelColumns;
   const sandTrips = builtArea * f.sandPerM2;
@@ -95,7 +130,9 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
   const concreteMaterial = cementBags * prices.cement + sandTrips * prices.sand + graniteTrips * prices.granite;
   const steelMaterial = steelTonnes * prices.steel;
   const blockworkMaterial = blocks * blockPrice;
-  const roofingMaterial = roofAreaM2 * prices.roofingSheet * 1.4; // sheets + fasteners + timber
+  const roofingMaterial = roofAreaM2 * prices.roofingSheet * 1.4 * roofMult; // sheets + fasteners + timber
+  const timberMaterial =
+    builtArea * formworkRate * 0.35 + wallAreaM2 * scaffoldRate * (floors > 1 ? 0.5 : 0.15);
   const sr = SERVICE_RATES[buildingType];
   const electricalMaterial = builtArea * sr.electrical;
   const plumbingMaterial = builtArea * sr.plumbing;
@@ -108,8 +145,8 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
       key: "excavation",
       label: "Excavation & Earthworks",
       icon: "🚧",
-      material: floorArea * 2500,
-      labour: floorArea * 1800,
+      material: floorArea * 2500 * foundationMult,
+      labour: floorArea * 1800 * foundationMult,
     },
     {
       key: "concrete",
@@ -137,7 +174,14 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
       label: "Roofing Works",
       icon: "🏠",
       material: roofingMaterial,
-      labour: roofAreaM2 * l.roofing * 0.4,
+      labour: roofAreaM2 * l.roofing * 0.4 * roofMult,
+    },
+    {
+      key: "timber",
+      label: "Timber & Woods (Formwork, Scaffolding)",
+      icon: "🪵",
+      material: timberMaterial,
+      labour: builtArea * l.carpentry * 0.2,
     },
     {
       key: "electrical",
@@ -180,7 +224,47 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
     return { ...t, material, labour, total: material + labour };
   });
 
+  // Fencing is an add-on stage costed from the site boundary, not prorated.
+  if (stages.includes("fencing")) {
+    const fenceLen = perimeter * 1.6;
+    const material = round(fenceLen * FENCING_RATES.materialPerM * regionMult);
+    const labour = round(fenceLen * FENCING_RATES.labourPerM * regionMult);
+    trades.push({
+      key: "fencing",
+      label: "Fencing (Boundary Wall)",
+      icon: "🧱",
+      material,
+      labour,
+      total: material + labour,
+    });
+  }
+
   const total = trades.reduce((s, t) => s + t.total, 0);
+
+  const fullBuildTotal =
+    stageFactor > 0
+      ? trades.filter((t) => t.key !== "fencing").reduce((s, t) => s + t.total, 0) / stageFactor
+      : 0;
+  const stageBreakdown = STAGES.filter((s) => !s.addon && s.key !== "full").map((s) => ({
+    key: s.key,
+    label: s.label,
+    cost: round(fullBuildTotal * s.factor),
+  }));
+
+  const haulage = HAULAGE_PER_TRIP * regionMult;
+  const transport = [
+    { item: "Cement deliveries", trips: Math.ceil((cementBags * stageFactor) / 600) },
+    { item: "Sand supply", trips: Math.ceil(sandTrips * stageFactor) },
+    { item: "Granite supply", trips: Math.ceil(graniteTrips * stageFactor) },
+    { item: "Block deliveries", trips: Math.ceil((blocks * stageFactor) / 500) },
+    { item: "Steel & general haulage", trips: Math.max(1, Math.ceil(steelTonnes * stageFactor / 5)) },
+  ].map((t) => ({ ...t, cost: round(t.trips * haulage) }));
+  const transportTotal = transport.reduce((s, t) => s + t.cost, 0);
+
+  const paymentSchedule = PAYMENT_SCHEDULE.map((p) => ({
+    ...p,
+    amount: round(total * p.pct),
+  }));
 
   return {
     total,
@@ -196,6 +280,10 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
       totalBuiltArea: Math.round(builtArea),
     },
     stageFactor,
+    stageBreakdown,
+    transport,
+    transportTotal,
+    paymentSchedule,
   };
 }
 

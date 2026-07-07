@@ -321,15 +321,15 @@ export default function App() {
 
             <section className="card">
               <h2>📐 Architectural Plan Upload</h2>
-              <p className="hint">Upload a floor plan PDF — we'll auto-detect the floor area and dimensions.</p>
+              <p className="hint">Upload a floor plan PDF or SVG (e.g. Matterport export) — we'll auto-detect the floor area and dimensions.</p>
               <label className="upload-box">
                 <input
                   type="file"
-                  accept="application/pdf"
+                  accept="application/pdf,image/svg+xml,.svg"
                   onChange={(e) => onPlanFile(e.target.files?.[0])}
                   hidden
                 />
-                📄 Tap to choose a PDF floor plan
+                📄 Tap to choose a PDF or SVG floor plan
               </label>
               {planStatus && <p className="hint">{planStatus}</p>}
             </section>

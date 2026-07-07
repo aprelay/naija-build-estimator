@@ -11,22 +11,44 @@ export interface PlanExtraction {
 }
 
 const num = (s: string) => parseFloat(s.replace(/,/g, ""));
+const SQFT_TO_SQM = 0.09290304;
+
+function svgText(svg: string): string {
+  // Concatenate the inner text of each <text> element (tspans fragment words).
+  const texts = svg.match(/<text[^>]*>[\s\S]*?<\/text>/g) ?? [];
+  return texts.map((t) => t.replace(/<[^>]+>/g, "")).join("\n");
+}
 
 export async function extractPlan(file: File): Promise<PlanExtraction> {
-  if (file.type !== "application/pdf") {
-    throw new Error("Only PDF floor plans can be parsed — images have no readable text. Enter details manually.");
+  const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (!isSvg && !isPdf) {
+    throw new Error("Only PDF or SVG floor plans can be parsed — images have no readable text. Enter details manually.");
   }
-  const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
   let text = "";
-  const pages = Math.min(doc.numPages, 8);
-  for (let i = 1; i <= pages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    text +=
-      content.items
-        .map((it) => ("str" in it ? it.str : ""))
-        .join(" ") + "\n";
+  if (isSvg) {
+    text = svgText(await file.text());
+  } else {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = Math.min(doc.numPages, 8);
+    for (let i = 1; i <= pages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      text +=
+        content.items
+          .map((it) => ("str" in it ? it.str : ""))
+          .join(" ") + "\n";
+    }
+  }
+
+  // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport exports)
+  const sqftMatch =
+    text.match(/total[^0-9]{0,12}([\d,]{2,9}(?:\.\d{1,2})?)\s*(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f)/i) ??
+    text.match(/([\d,]{2,9}(?:\.\d{1,2})?)\s*(?:sq\.?\s*\.?\s*ft|sqft|ft²)\b/i);
+  if (sqftMatch) {
+    const areaSqm = Math.round(num(sqftMatch[1]) * SQFT_TO_SQM);
+    if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null };
   }
 
   // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"

@@ -58,8 +58,8 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
 
   // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"
   const areaMatch = text.match(
-    /(?:total|floor|plan|gross|built|site)?\s*area[^0-9]{0,12}([\d,]{2,7}(?:\.\d{1,2})?)\s*(?:sq\.?\s*m|sqm|m²|m2|square met)/i,
-  ) ?? text.match(/(?<![\d.,])(\d[\d,]{1,6}(?:\.\d{1,2})?)\s*(?:sqm|m²|m2)\b/i);
+    /(?:total|floor|plan|gross|built|site)?\s*area[^0-9]{0,12}([\d,]{2,7}(?:\.\d{1,3})?)\s*(?:sq\.?\s*m|sqm|m²|m2|square met)/i,
+  );
 
   // e.g. "20m x 15m", "20.5 × 15"
   const dimMatch = text.match(
@@ -69,15 +69,17 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   let areaSqm = areaMatch ? num(areaMatch[1]) : null;
   const lengthM = dimMatch ? num(dimMatch[1]) : null;
   const widthM = dimMatch ? num(dimMatch[2]) : null;
-  if (!areaSqm && lengthM && widthM) areaSqm = Math.round(lengthM * widthM);
 
-  // No stated total — sum per-room areas (e.g. ArchiCAD room stamps "33.458 m2")
+  // No labelled total — use the area stamps on the drawing: a single stamp is the
+  // floor area; multiple stamps (per floor or per room) are summed.
   if (!areaSqm) {
-    const rooms = (text.match(/\d{1,4}(?:\.\d{1,3})?\s*(?:m2|sqm)\b/gi) ?? [])
+    const stamps = (text.match(/(?<![\d.,])\d{1,4}(?:\.\d{1,3})?\s*(?:m2|sqm)\b/gi) ?? [])
       .map((r) => parseFloat(r))
-      .filter((v) => v >= 1 && v <= 500);
-    if (rooms.length >= 3) areaSqm = Math.round(rooms.reduce((s, v) => s + v, 0));
+      .filter((v) => v >= 1 && v <= 2000);
+    if (stamps.length === 1 && stamps[0] >= 10) areaSqm = Math.round(stamps[0]);
+    else if (stamps.length >= 2) areaSqm = Math.round(stamps.reduce((s, v) => s + v, 0));
   }
+  if (!areaSqm && lengthM && widthM) areaSqm = Math.round(lengthM * widthM);
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
   return { areaSqm, lengthM, widthM };
 }

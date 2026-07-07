@@ -83,6 +83,35 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     else if (stamps.length >= 2) areaSqm = Math.round(stamps.reduce((s, v) => s + v, 0));
   }
   if (!areaSqm && lengthM && widthM) areaSqm = Math.round(lengthM * widthM);
+
+  // Metric CAD drawings with dimension chains in millimetres and no stated area:
+  // the overall building dimensions are the large mm values repeated on the
+  // drawing (once per axis end). Take the two largest repeated values as
+  // length × width, and multiply by the number of distinct floor plans shown.
+  if (!areaSqm && /floor\s*plan/i.test(text)) {
+    const counts = new Map<number, number>();
+    for (const m of text.match(/(?<![\d.,])\d{4,5}(?![\d.,])/g) ?? []) {
+      const v = parseInt(m, 10);
+      if (v >= 4000 && v <= 80000) counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    const dims = [...counts.entries()]
+      .filter(([, c]) => c >= 2)
+      .map(([v]) => v)
+      .sort((a, b) => b - a)
+      .slice(0, 2);
+    if (dims.length === 2) {
+      const [l, w] = dims.map((v) => v / 1000);
+      const floors = new Set(
+        (text.match(/\b(?:ground|first|second|third|fourth|typical|upper|lower)\s+floor\s+plan/gi) ?? []).map((s) =>
+          s.toLowerCase().replace(/\s+/g, " "),
+        ),
+      ).size || 1;
+      const perFloor = l * w;
+      if (perFloor >= 20 && perFloor <= 2000) {
+        areaSqm = Math.round(perFloor * floors);
+      }
+    }
+  }
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
   return { areaSqm, lengthM, widthM, hasPool };
 }

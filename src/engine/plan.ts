@@ -31,7 +31,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
   } else {
     const buf = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buf }).promise;
-    const pages = Math.min(doc.numPages, 8);
+    const pages = Math.min(doc.numPages, 20);
     for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
@@ -42,10 +42,12 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     }
   }
 
-  // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport exports)
+  // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport) or "TOTAL 2302 SF"
+  const FT_UNIT = String.raw`(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f|s\.?f\.?\b)`;
   const sqftMatch =
-    text.match(/total[^0-9]{0,12}([\d,]{2,9}(?:\.\d{1,2})?)\s*(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f)/i) ??
-    text.match(/([\d,]{2,9}(?:\.\d{1,2})?)\s*(?:sq\.?\s*\.?\s*ft|sqft|ft²)\b/i);
+    text.match(new RegExp(String.raw`total[^0-9]{0,20}([\d,]{2,9}(?:\.\d{1,2})?)\s*${FT_UNIT}`, "i")) ??
+    text.match(new RegExp(String.raw`(?:gross|floor|building)\s*area[^0-9]{0,20}([\d,]{2,9}(?:\.\d{1,2})?)\s*${FT_UNIT}`, "i")) ??
+    text.match(new RegExp(String.raw`([\d,]{2,9}(?:\.\d{1,2})?)\s*${FT_UNIT}`, "i"));
   if (sqftMatch) {
     const areaSqm = Math.round(num(sqftMatch[1]) * SQFT_TO_SQM);
     if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null };

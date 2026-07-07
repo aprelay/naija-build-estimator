@@ -101,6 +101,18 @@ body {
   margin-bottom: 12px;
 }
 
+.admin-box {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px dashed var(--border, #d4d4d8);
+  border-radius: 10px;
+}
+
+.admin-box h3 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
 .field {
   margin-bottom: 14px;
   display: flex;

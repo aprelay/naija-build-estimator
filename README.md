@@ -11,6 +11,7 @@ A mobile-first Nigerian construction cost estimator (Bill of Quantities generato
 - **Material quantities** — cement bags, steel tonnage, sand/granite trips, blocks, roof area.
 - **PDF export** — one-tap Bill of Quantities PDF (jsPDF).
 - **Editable unit prices** — adjust market rates to your locality; persisted on-device.
+- **Published market prices** — an admin can publish updated Nigerian market prices via the Prices tab (or API); all users without local overrides pick them up automatically.
 - **Saved estimates** — history stored in localStorage; reload any past project.
 - **PWA-ready** — installable, mobile-first, works fully offline after first load (no backend).
 
@@ -18,7 +19,7 @@ A mobile-first Nigerian construction cost estimator (Bill of Quantities generato
 
 - React 18 + TypeScript + Vite
 - jsPDF for PDF generation
-- No backend — all data stays in the browser (localStorage)
+- Cloudflare Pages + Pages Functions + KV for the market-prices API; estimates and overrides stay in the browser (localStorage)
 
 ## Development
 
@@ -29,6 +30,20 @@ npm run build      # typecheck + production build
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
 ```
+
+## Deployment & Prices API
+
+Deployed on Cloudflare Pages: https://naija-build-estimator.pages.dev
+
+```bash
+npm run build
+npx wrangler@3 pages deploy dist --project-name naija-build-estimator --branch main
+```
+
+The market-prices API lives in `functions/api/prices.ts` (Pages Function bound to the `PRICES_KV` KV namespace, with an `ADMIN_KEY` secret):
+
+- `GET /api/prices` — returns the published prices (`{prices, updatedAt}`) that all clients load on startup.
+- `PUT /api/prices` — publishes new prices for all users. Requires `Authorization: Bearer <ADMIN_KEY>` and a JSON body with all six numeric prices (`cement`, `steel`, `sand`, `granite`, `block`, `roofingSheet`). Also available via the Admin section of the Prices tab in-app.
 
 ## Disclaimer
 

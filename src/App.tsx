@@ -21,6 +21,7 @@ interface SavedEstimate {
 
 const HISTORY_KEY = "nbe_history";
 const PRICES_KEY = "nbe_prices";
+const PRICES_CUSTOM_KEY = "nbe_prices_custom";
 
 function loadHistory(): SavedEstimate[] {
   try {
@@ -39,6 +40,10 @@ function loadPrices(): UnitPrices {
   }
 }
 
+function hasCustomPrices(): boolean {
+  return localStorage.getItem(PRICES_CUSTOM_KEY) === "1";
+}
+
 type Tab = "estimate" | "prices" | "history";
 
 export default function App() {
@@ -53,6 +58,10 @@ export default function App() {
   const [stages, setStages] = useState<string[]>(["full"]);
   const [projectName, setProjectName] = useState("");
   const [prices, setPrices] = useState<UnitPrices>(loadPrices());
+  const [marketPrices, setMarketPrices] = useState<UnitPrices | null>(null);
+  const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
+  const [adminKey, setAdminKey] = useState("");
+  const [publishStatus, setPublishStatus] = useState("");
   const [currency, setCurrency] = useState<string>("NGN");
   const [history, setHistory] = useState<SavedEstimate[]>(loadHistory());
   const [openTrades, setOpenTrades] = useState(true);
@@ -60,6 +69,51 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
   }, [prices]);
+
+  useEffect(() => {
+    fetch("/api/prices")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { prices: UnitPrices | null; updatedAt: string | null } | null) => {
+        if (!data?.prices) return;
+        const merged = { ...DEFAULT_PRICES, ...data.prices };
+        setMarketPrices(merged);
+        setMarketUpdatedAt(data.updatedAt);
+        if (!hasCustomPrices()) setPrices(merged);
+      })
+      .catch(() => {});
+  }, []);
+
+  function editPrice(k: keyof UnitPrices, value: number) {
+    localStorage.setItem(PRICES_CUSTOM_KEY, "1");
+    setPrices((p) => ({ ...p, [k]: value }));
+  }
+
+  function resetPrices() {
+    localStorage.removeItem(PRICES_CUSTOM_KEY);
+    setPrices(marketPrices ? { ...marketPrices } : { ...DEFAULT_PRICES });
+  }
+
+  async function publishPrices() {
+    setPublishStatus("Publishing…");
+    try {
+      const res = await fetch("/api/prices", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
+        body: JSON.stringify(prices),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        setPublishStatus(`Failed: ${err?.error ?? res.status}`);
+        return;
+      }
+      const data = (await res.json()) as { prices: UnitPrices; updatedAt: string };
+      setMarketPrices({ ...DEFAULT_PRICES, ...data.prices });
+      setMarketUpdatedAt(data.updatedAt);
+      setPublishStatus("Published — all users now see these prices.");
+    } catch {
+      setPublishStatus("Failed: network error");
+    }
+  }
 
   const area = parseFloat(floorArea) || 0;
 
@@ -363,20 +417,43 @@ export default function App() {
         {tab === "prices" && (
           <section className="card">
             <h2>⚙️ Unit Prices (₦)</h2>
-            <p className="hint">Adjust to your local market. Saved automatically on this device.</p>
+            <p className="hint">
+              Adjust to your local market. Saved automatically on this device.
+              {marketUpdatedAt &&
+                ` Market prices last published ${new Date(marketUpdatedAt).toLocaleDateString("en-NG")}.`}
+            </p>
             {(Object.keys(prices) as (keyof UnitPrices)[]).map((k) => (
               <div className="field" key={k}>
                 <label>{PRICE_LABELS[k]}</label>
                 <input
                   type="number"
                   value={prices[k]}
-                  onChange={(e) => setPrices({ ...prices, [k]: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) => editPrice(k, parseFloat(e.target.value) || 0)}
                 />
               </div>
             ))}
-            <button className="secondary" onClick={() => setPrices({ ...DEFAULT_PRICES })}>
-              ↺ Reset to defaults
+            <button className="secondary" onClick={resetPrices}>
+              ↺ Reset to market prices
             </button>
+            <div className="admin-box">
+              <h3>🔐 Admin — publish market prices</h3>
+              <p className="hint">
+                With the admin key, publish the prices above as the market default for all users.
+              </p>
+              <div className="field">
+                <label>Admin key</label>
+                <input
+                  type="password"
+                  value={adminKey}
+                  onChange={(e) => setAdminKey(e.target.value)}
+                  placeholder="Enter admin key"
+                />
+              </div>
+              <button className="primary" onClick={publishPrices} disabled={!adminKey}>
+                📢 Publish to all users
+              </button>
+              {publishStatus && <p className="hint">{publishStatus}</p>}
+            </div>
           </section>
         )}
 

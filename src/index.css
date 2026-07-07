@@ -522,14 +522,14 @@ select:focus {
   background: #fff;
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .tabbar button {
   background: none;
   border: none;
-  padding: 12px;
-  font-size: 20px;
+  padding: 8px 4px;
+  font-size: 18px;
   cursor: pointer;
   color: var(--muted);
   display: flex;

@@ -1,11 +1,13 @@
 import { useMemo, useState, useEffect } from "react";
 import {
+  BLOCK_OPTIONS,
   DEFAULT_PRICES,
   FORMWORK_TYPES,
   FOUNDATION_TYPES,
   FX_RATES,
   ROOF_TYPES,
   SCAFFOLDING_TYPES,
+  SITE_ADDONS,
   STAGES,
   STATES,
   SUBTYPES,
@@ -31,6 +33,15 @@ interface SavedEstimate {
 const HISTORY_KEY = "nbe_history";
 const PRICES_KEY = "nbe_prices";
 const PRICES_CUSTOM_KEY = "nbe_prices_custom";
+const BRAND_KEY = "nbe_branding";
+
+function loadBranding(): { companyName: string; companyPhone: string } {
+  try {
+    return { companyName: "", companyPhone: "", ...JSON.parse(localStorage.getItem(BRAND_KEY) || "{}") };
+  } catch {
+    return { companyName: "", companyPhone: "" };
+  }
+}
 
 function loadHistory(): SavedEstimate[] {
   try {
@@ -99,13 +110,22 @@ export default function App() {
   const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => loadAdminSettings());
   const [roofingMaterial, setRoofingMaterial] = useState("");
   const [includeWaterTank, setIncludeWaterTank] = useState(false);
+  const [siteAddons, setSiteAddons] = useState<string[]>([]);
+  const [contingencyPct, setContingencyPct] = useState("10");
+  const [branding, setBranding] = useState(loadBranding());
+  const [publishState, setPublishState] = useState("");
+
+  useEffect(() => {
+    localStorage.setItem(BRAND_KEY, JSON.stringify(branding));
+  }, [branding]);
 
   useEffect(() => {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
   }, [prices]);
 
+  // Load market prices for the selected state (state-specific set falls back to national).
   useEffect(() => {
-    fetch("/api/prices")
+    fetch(`/api/prices?state=${encodeURIComponent(state)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { prices: UnitPrices | null; updatedAt: string | null } | null) => {
         if (!data?.prices) return;
@@ -115,7 +135,7 @@ export default function App() {
         if (!hasCustomPrices()) setPrices(merged);
       })
       .catch(() => {});
-  }, []);
+  }, [state]);
 
   function editPrice(k: keyof UnitPrices, value: number) {
     localStorage.setItem(PRICES_CUSTOM_KEY, "1");
@@ -130,7 +150,8 @@ export default function App() {
   async function publishPrices() {
     setPublishStatus("Publishing…");
     try {
-      const res = await fetch("/api/prices", {
+      const url = publishState ? `/api/prices?state=${encodeURIComponent(publishState)}` : "/api/prices";
+      const res = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
         body: JSON.stringify(prices),
@@ -143,7 +164,11 @@ export default function App() {
       const data = (await res.json()) as { prices: UnitPrices; updatedAt: string };
       setMarketPrices({ ...DEFAULT_PRICES, ...data.prices });
       setMarketUpdatedAt(data.updatedAt);
-      setPublishStatus("Published — all users now see these prices.");
+      setPublishStatus(
+        publishState
+          ? `Published for ${publishState} — users in ${publishState} now see these prices.`
+          : "Published — all users now see these prices (national default).",
+      );
     } catch {
       setPublishStatus("Failed: network error");
     }
@@ -173,11 +198,14 @@ export default function App() {
       columnDepthMm: parseFloat(columnDepthMm) || 0,
       roofingMaterial: roofingMaterial || undefined,
       includeWaterTank,
+      siteAddons,
+      contingencyPct: parseFloat(contingencyPct) || 0,
       admin: adminSettings,
     }),
     [buildingType, subtype, area, storeys, columns, state, blockPrice, stages, prices,
       length, width, roofType, foundationType, formwork, scaffolding,
-      columnHeight, columnWidthMm, columnDepthMm, roofingMaterial, includeWaterTank, adminSettings],
+      columnHeight, columnWidthMm, columnDepthMm, roofingMaterial, includeWaterTank,
+      siteAddons, contingencyPct, adminSettings],
   );
 
   const result = useMemo(() => (area > 0 ? computeEstimate(input) : null), [input, area]);
@@ -275,6 +303,27 @@ export default function App() {
     }
   }
 
+  function toggleAddon(key: string) {
+    setSiteAddons((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  function shareWhatsApp() {
+    if (!result) return;
+    const lines = [
+      `*${projectName || "Construction Estimate"}* — ${branding.companyName || "Naija Build Estimator"}`,
+      `${area} sqm · ${storeys === 0 ? "Bungalow" : `${storeys} storey${storeys > 1 ? "s" : ""}`} · ${state}`,
+      ``,
+      `*Total: ${formatNaira(result.grandTotal)}*`,
+      ...(result.contingency > 0 ? [`(incl. ${formatNaira(result.contingency)} contingency)`] : []),
+      ``,
+      `Breakdown:`,
+      ...result.trades.map((t) => `• ${t.label}: ${formatNaira(t.total)}`),
+      ``,
+      `Generated ${new Date().toLocaleDateString("en-NG")} · naija-build-estimator.pages.dev`,
+    ];
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  }
+
   const timeline = useMemo(() => computeTimeline(storeys, stages), [storeys, stages]);
 
   const topTrade = result
@@ -299,7 +348,12 @@ export default function App() {
             {result && (
               <section className="total-card">
                 <div className="total-label">Total Project Estimate</div>
-                <div className="total-value">{convert(result.total)}</div>
+                <div className="total-value">{convert(result.grandTotal)}</div>
+                {result.contingency > 0 && (
+                  <div className="total-meta">
+                    incl. {convert(result.contingency)} contingency ({contingencyPct}%) · works {convert(result.total)}
+                  </div>
+                )}
                 <div className="fx-row">
                   {["NGN", "USD", "GBP", "EUR", "CAD", "AUD"].map((c) => (
                     <button
@@ -316,6 +370,11 @@ export default function App() {
                   {state} · excl. VAT
                   {topTrade && ` · Top: ${topTrade.label} (${Math.round((topTrade.total / result.total) * 100)}%)`}
                 </div>
+                {marketUpdatedAt && (
+                  <div className="total-meta">
+                    📈 Market prices as of {new Date(marketUpdatedAt).toLocaleDateString("en-NG")}
+                  </div>
+                )}
               </section>
             )}
 
@@ -517,19 +576,45 @@ export default function App() {
               <div className="field">
                 <label>Block Type</label>
                 <div className="block-toggle">
-                  <button
-                    className={blockPrice === 750 ? "active" : ""}
-                    onClick={() => setBlockPrice(750)}
-                  >
-                    🧱 Manual Mould · ₦750
-                  </button>
-                  <button
-                    className={blockPrice === 1250 ? "active" : ""}
-                    onClick={() => setBlockPrice(1250)}
-                  >
-                    🏭 Machine Vibrated · ₦1,250
-                  </button>
+                  {BLOCK_OPTIONS.map((b) => (
+                    <button
+                      key={b.price}
+                      className={blockPrice === b.price ? "active" : ""}
+                      onClick={() => setBlockPrice(b.price)}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
                 </div>
+                <small>Mould on-site: buy cement & sand and mould blocks at the site — usually the cheapest option.</small>
+              </div>
+            </section>
+
+            <section className="card">
+              <h2>🌍 Site Preparation & Utilities</h2>
+              <p className="hint">Common Nigerian site add-ons — costed as lump sums on top of the build.</p>
+              {SITE_ADDONS.map((a) => (
+                <label key={a.key} className={`stage ${siteAddons.includes(a.key) ? "on" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={siteAddons.includes(a.key)}
+                    onChange={() => toggleAddon(a.key)}
+                  />
+                  <div>
+                    <strong>{a.icon} {a.label}</strong>
+                    <span>{a.hint}</span>
+                  </div>
+                </label>
+              ))}
+              <div className="field">
+                <label>Contingency / Inflation Buffer (%)</label>
+                <input
+                  type="number"
+                  value={contingencyPct}
+                  onChange={(e) => setContingencyPct(e.target.value)}
+                  placeholder="10"
+                />
+                <small>Naira material prices move fast — 10–15% is typical for projects longer than 3 months.</small>
               </div>
             </section>
 
@@ -675,8 +760,20 @@ export default function App() {
 
             {result && (
               <div className="actions">
-                <button className="primary" onClick={() => exportEstimatePdf(input, result, projectName)}>
+                <button
+                  className="primary"
+                  onClick={() =>
+                    exportEstimatePdf(input, result, projectName, {
+                      companyName: branding.companyName,
+                      companyPhone: branding.companyPhone,
+                      pricesAsOf: marketUpdatedAt,
+                    })
+                  }
+                >
                   📄 Download PDF
+                </button>
+                <button className="secondary" onClick={shareWhatsApp}>
+                  💬 Share on WhatsApp
                 </button>
                 <button className="secondary" onClick={saveToHistory}>
                   💾 Save Estimate
@@ -769,10 +866,40 @@ export default function App() {
               ↺ Reset to market prices
             </button>
             <div className="admin-box">
+              <h3>🏷️ Your Branding (PDF & WhatsApp)</h3>
+              <p className="hint">Shown on exported BOQ PDFs and shared estimates. Saved on this device.</p>
+              <div className="field">
+                <label>Company / Business Name</label>
+                <input
+                  value={branding.companyName}
+                  onChange={(e) => setBranding((b) => ({ ...b, companyName: e.target.value }))}
+                  placeholder="e.g. Adeyemi Construction Ltd"
+                />
+              </div>
+              <div className="field">
+                <label>Phone / WhatsApp</label>
+                <input
+                  value={branding.companyPhone}
+                  onChange={(e) => setBranding((b) => ({ ...b, companyPhone: e.target.value }))}
+                  placeholder="e.g. 0803 123 4567"
+                />
+              </div>
+            </div>
+            <div className="admin-box">
               <h3>🔐 Admin — publish market prices</h3>
               <p className="hint">
                 With the admin key, publish the prices above as the market default for all users.
               </p>
+              <div className="field">
+                <label>Publish scope</label>
+                <select value={publishState} onChange={(e) => setPublishState(e.target.value)}>
+                  <option value="">🇳🇬 National (all states)</option>
+                  {STATES.map((s) => (
+                    <option key={s} value={s}>{s} only</option>
+                  ))}
+                </select>
+                <small>State-specific prices override the national set for users in that state.</small>
+              </div>
               <div className="field">
                 <label>Admin key</label>
                 <input

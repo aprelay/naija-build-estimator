@@ -108,6 +108,37 @@ export const SCAFFOLDING_TYPES: OptionRate[] = [
   { value: "metal_scaffold", label: "Metal Scaffold", ratePerM2: 1500 },
 ];
 
+// Site preparation & utility add-ons (₦). Lump sums unless perM2 rates given.
+export interface SiteAddon {
+  key: string;
+  label: string;
+  icon: string;
+  material: number;
+  labour: number;
+  materialPerM2?: number; // per m2 of footprint, added to material
+  labourPerM2?: number;
+  hint: string;
+}
+
+export const SITE_ADDONS: SiteAddon[] = [
+  { key: "clearing", label: "Site Clearing & Levelling", icon: "🌿", material: 0, labour: 0, materialPerM2: 350, labourPerM2: 850, hint: "Bush clearing, debris removal, rough grading" },
+  { key: "dewatering", label: "Dewatering (waterlogged site)", icon: "💦", material: 150000, labour: 280000, hint: "Pumping & sand filling for swampy sites (Lagos/PH lowlands)" },
+  { key: "soakaway", label: "Soakaway & Septic Tank", icon: "🕳️", material: 850000, labour: 380000, hint: "Standard 2-chamber septic + soakaway pit" },
+  { key: "borehole", label: "Borehole & Water Treatment", icon: "🚠", material: 1400000, labour: 450000, hint: "Drilling, casing, pump & basic treatment" },
+  { key: "genset", label: "Generator Set (sized to building)", icon: "🔌", material: 0, labour: 250000, hint: "10–40 kVA diesel genset, supply & installation" },
+  { key: "solar", label: "Solar + Inverter Backup", icon: "☀️", material: 3800000, labour: 420000, hint: "5kVA hybrid inverter, panels & lithium battery" },
+];
+
+// Genset supply cost scales with built area
+export const gensetCost = (builtArea: number) =>
+  builtArea <= 250 ? 2500000 : builtArea <= 600 ? 4500000 : 7500000;
+
+export const BLOCK_OPTIONS = [
+  { price: 620, label: "⛏️ Mould On-Site · ₦620", hint: "Cement + sand + moulding labour on site" },
+  { price: 750, label: "🧱 Manual Mould · ₦750", hint: "" },
+  { price: 1250, label: "🏭 Machine Vibrated · ₦1,250", hint: "" },
+];
+
 // Boundary fencing (2.4m block wall with pillars), ₦ per linear metre
 export const FENCING_RATES = { materialPerM: 38000, labourPerM: 9000 };
 

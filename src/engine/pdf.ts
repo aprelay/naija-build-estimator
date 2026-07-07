@@ -8,7 +8,18 @@ function subtypeLabel(input: EstimateInput): string {
   return list.find((s) => s.value === input.subtype)?.label ?? input.subtype;
 }
 
-export function exportEstimatePdf(input: EstimateInput, result: EstimateResult, projectName: string) {
+export interface PdfBranding {
+  companyName?: string;
+  companyPhone?: string;
+  pricesAsOf?: string | null;
+}
+
+export function exportEstimatePdf(
+  input: EstimateInput,
+  result: EstimateResult,
+  projectName: string,
+  branding: PdfBranding = {},
+) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
@@ -19,10 +30,16 @@ export function exportEstimatePdf(input: EstimateInput, result: EstimateResult, 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(20);
   doc.setFont("helvetica", "bold");
-  doc.text("Naija Build Estimator", margin, 34);
+  doc.text(branding.companyName || "Naija Build Estimator", margin, 34);
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
-  doc.text("Bill of Quantities — Cost Estimate", margin, 54);
+  doc.text(
+    branding.companyPhone
+      ? `Bill of Quantities — Cost Estimate · ${branding.companyPhone}`
+      : "Bill of Quantities — Cost Estimate",
+    margin,
+    54,
+  );
   y = 100;
 
   doc.setTextColor(20, 20, 20);
@@ -42,6 +59,9 @@ export function exportEstimatePdf(input: EstimateInput, result: EstimateResult, 
     `Location: ${input.state}`,
     `Stages: ${stageLabels}`,
     `Generated: ${new Date().toLocaleDateString("en-NG")}`,
+    ...(branding.pricesAsOf
+      ? [`Market prices as of: ${new Date(branding.pricesAsOf).toLocaleDateString("en-NG")}`]
+      : []),
   ];
   meta.forEach((line) => {
     doc.text(line, margin, y);
@@ -59,8 +79,21 @@ export function exportEstimatePdf(input: EstimateInput, result: EstimateResult, 
   doc.text("Total Project Estimate", margin, y);
   doc.setTextColor(109, 40, 217);
   doc.setFontSize(16);
-  doc.text(formatNaira(result.total), pageW - margin, y, { align: "right" });
-  y += 28;
+  doc.text(formatNaira(result.grandTotal), pageW - margin, y, { align: "right" });
+  y += 18;
+  if (result.contingency > 0) {
+    doc.setTextColor(90, 90, 90);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      `Includes ${formatNaira(result.contingency)} contingency (${input.contingencyPct}%) on works of ${formatNaira(result.total)}`,
+      pageW - margin,
+      y,
+      { align: "right" },
+    );
+    y += 14;
+  }
+  y += 10;
 
   // Trade table
   doc.setTextColor(20, 20, 20);

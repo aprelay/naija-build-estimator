@@ -16,13 +16,24 @@ interface EventContext {
 const PRICE_KEYS = ["cement", "steel", "sand", "granite", "block", "roofingSheet"] as const;
 const KV_KEY = "prices";
 
+function kvKeyFor(state: string | null): string {
+  if (!state) return KV_KEY;
+  const clean = state.replace(/[^a-z ]/gi, "").trim();
+  return clean ? `${KV_KEY}:${clean.toLowerCase()}` : KV_KEY;
+}
+
 const JSON_HEADERS = {
   "Content-Type": "application/json",
   "Cache-Control": "no-store",
 };
 
 export async function onRequestGet(ctx: EventContext): Promise<Response> {
-  const stored = await ctx.env.PRICES_KV.get(KV_KEY);
+  const state = new URL(ctx.request.url).searchParams.get("state");
+  const stateKey = kvKeyFor(state);
+  // Prefer state-specific prices, fall back to the national set.
+  const stored =
+    (stateKey !== KV_KEY ? await ctx.env.PRICES_KV.get(stateKey) : null) ??
+    (await ctx.env.PRICES_KV.get(KV_KEY));
   if (!stored) {
     return new Response(JSON.stringify({ prices: null, updatedAt: null }), { headers: JSON_HEADERS });
   }
@@ -51,7 +62,8 @@ export async function onRequestPut(ctx: EventContext): Promise<Response> {
     }
     prices[key] = v;
   }
-  const payload = JSON.stringify({ prices, updatedAt: new Date().toISOString() });
-  await ctx.env.PRICES_KV.put(KV_KEY, payload);
+  const state = new URL(ctx.request.url).searchParams.get("state");
+  const payload = JSON.stringify({ prices, updatedAt: new Date().toISOString(), state: state || null });
+  await ctx.env.PRICES_KV.put(kvKeyFor(state), payload);
   return new Response(payload, { headers: JSON_HEADERS });
 }

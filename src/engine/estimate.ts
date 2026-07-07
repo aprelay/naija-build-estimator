@@ -10,8 +10,10 @@ import {
   ROOF_TYPES,
   SCAFFOLDING_TYPES,
   SERVICE_RATES,
+  SITE_ADDONS,
   STAGES,
   STATE_MULTIPLIERS,
+  gensetCost,
 } from "./data";
 import type { BuildingType, UnitPrices } from "./data";
 import { DEFAULT_ADMIN, excavationCost, tankStandCost } from "./admin";
@@ -38,6 +40,8 @@ export interface EstimateInput {
   columnDepthMm?: number;
   roofingMaterial?: string; // "tiles" or an aluminium gauge like "0.55mm"
   includeWaterTank?: boolean; // MEP add-on: overhead tank stand
+  siteAddons?: string[]; // keys from SITE_ADDONS
+  contingencyPct?: number; // inflation / price-volatility buffer
   admin?: AdminSettings;
 }
 
@@ -54,6 +58,8 @@ export interface EstimateResult {
     wallAreaM2: number;
     totalBuiltArea: number;
   };
+  contingency: number;
+  grandTotal: number;
   stageFactor: number;
   stageBreakdown: { key: string; label: string; cost: number }[];
   transport: { item: string; trips: number; cost: number }[];
@@ -279,8 +285,27 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
     });
   }
 
+  // Site preparation & utility add-ons — lump sums, region-adjusted, not stage-prorated.
+  for (const key of input.siteAddons ?? []) {
+    const a = SITE_ADDONS.find((x) => x.key === key);
+    if (!a) continue;
+    let material = a.material + (a.materialPerM2 ?? 0) * floorArea;
+    const labour = a.labour + (a.labourPerM2 ?? 0) * floorArea;
+    if (a.key === "genset") material += gensetCost(builtArea);
+    trades.push({
+      key: `addon_${a.key}`,
+      label: a.label,
+      icon: a.icon,
+      material: round(material * regionMult),
+      labour: round(labour * regionMult),
+      total: round(material * regionMult) + round(labour * regionMult),
+    });
+  }
+
   const visibleTrades = trades.filter((t) => !admin.hiddenTrades.includes(t.key));
   const total = visibleTrades.reduce((s, t) => s + t.total, 0);
+  const contingency = round(total * ((input.contingencyPct ?? 0) / 100));
+  const grandTotal = total + contingency;
 
   const fullBuildTotal =
     stageFactor > 0
@@ -305,11 +330,13 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
 
   const paymentSchedule = PAYMENT_SCHEDULE.map((p) => ({
     ...p,
-    amount: round(total * p.pct),
+    amount: round(grandTotal * p.pct),
   }));
 
   return {
     total,
+    contingency,
+    grandTotal,
     trades: visibleTrades,
     quantities: {
       cementBags: Math.ceil(cementBags * stageFactor),

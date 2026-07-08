@@ -9,6 +9,8 @@ export interface PlanExtraction {
   lengthM: number | null;
   widthM: number | null;
   hasPool: boolean;
+  /** Distinct floor levels found on the drawing (ground floor counts as 1). */
+  floors: number | null;
 }
 
 const num = (s: string) => parseFloat(s.replace(/,/g, ""));
@@ -48,6 +50,14 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
 
   const hasPool = /swimming\s*pool|\bpool\b/i.test(text);
 
+  // Distinct floor-plan labels, e.g. "GROUND FLOOR PLAN", "FIRST FLOOR PLAN".
+  const floorLabels = new Set(
+    (text.match(/\b(?:ground|first|second|third|fourth|fifth|typical|upper|lower)\s+floor\s+plan/gi) ?? []).map((s) =>
+      s.toLowerCase().replace(/\s+/g, " "),
+    ),
+  );
+  let floors: number | null = floorLabels.size || null;
+
   // Imperial totals, e.g. "TOTAL: 2,043 sq. ft" (Matterport) or "TOTAL 2302 SF"
   const FT_UNIT = String.raw`(?:sq\.?\s*\.?\s*ft|sqft|ft²|square f|s\.?f\.?\b)`;
   const sqftMatch =
@@ -56,7 +66,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     text.match(new RegExp(String.raw`([\d,]{2,9}(?:\.\d{1,2})?)\s*${FT_UNIT}`, "i"));
   if (sqftMatch) {
     const areaSqm = Math.round(num(sqftMatch[1]) * SQFT_TO_SQM);
-    if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null, hasPool };
+    if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null, hasPool, floors };
   }
 
   // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"
@@ -101,14 +111,9 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
       .slice(0, 2);
     if (dims.length === 2) {
       const [l, w] = dims.map((v) => v / 1000);
-      const floors = new Set(
-        (text.match(/\b(?:ground|first|second|third|fourth|typical|upper|lower)\s+floor\s+plan/gi) ?? []).map((s) =>
-          s.toLowerCase().replace(/\s+/g, " "),
-        ),
-      ).size || 1;
       const perFloor = l * w;
       if (perFloor >= 20 && perFloor <= 2000) {
-        areaSqm = Math.round(perFloor * floors);
+        areaSqm = Math.round(perFloor * (floors ?? 1));
       }
     }
   }
@@ -130,9 +135,12 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
       }
       if (sum >= 10 && !kept.some((k) => Math.abs(k - sum) / k < 0.03)) kept.push(sum);
     }
-    if (kept.length) areaSqm = Math.round(kept.reduce((s, v) => s + v, 0));
+    if (kept.length) {
+      areaSqm = Math.round(kept.reduce((s, v) => s + v, 0));
+      if (!floors) floors = kept.length;
+    }
   }
 
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
-  return { areaSqm, lengthM, widthM, hasPool };
+  return { areaSqm, lengthM, widthM, hasPool, floors };
 }

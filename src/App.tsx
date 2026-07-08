@@ -306,8 +306,9 @@ export default function App() {
       if (p.lengthM) setLength(String(p.lengthM));
       if (p.widthM) setWidth(String(p.widthM));
       if (p.hasPool && !poolSize) setPoolSize("medium");
+      if (p.floors) setStoreys(Math.min(p.floors - 1, 10));
       setPlanStatus(
-        `Detected${p.areaSqm ? ` area ${p.areaSqm} sqm` : ""}${p.lengthM ? ` · ${p.lengthM}m × ${p.widthM}m` : ""}${p.hasPool ? " · 🏊 pool on plan (added — adjust size below)" : ""} — review below.`,
+        `Detected${p.areaSqm ? ` area ${p.areaSqm} sqm` : ""}${p.lengthM ? ` · ${p.lengthM}m × ${p.widthM}m` : ""}${p.floors ? ` · ${p.floors === 1 ? "bungalow" : `${p.floors} floors (${p.floors - 1} storey${p.floors > 2 ? "s" : ""})`}` : ""}${p.hasPool ? " · 🏊 pool on plan (added — adjust size below)" : ""} — review below.`,
       );
     } catch (e) {
       setPlanStatus(e instanceof Error ? e.message : "Could not read that file.");

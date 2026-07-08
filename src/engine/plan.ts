@@ -112,6 +112,27 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
       }
     }
   }
+  // Imperial drawings with only per-room dimensions (11'-6" X 17'-3") and no
+  // stated area: sum the room areas per page. Pages whose totals are within 3%
+  // of an earlier page are alternative options of the same floor — count once.
+  if (!areaSqm) {
+    const dimRe = /(\d{1,2})'(?:-(\d{1,2})\s*(?:\d\/\d)?")?\s*[xX×]\s*(\d{1,2})'(?:-(\d{1,2})\s*(?:\d\/\d)?")?/g;
+    const kept: number[] = [];
+    for (const pageText of text.split("\n")) {
+      let m: RegExpExecArray | null;
+      let sum = 0;
+      dimRe.lastIndex = 0;
+      while ((m = dimRe.exec(pageText))) {
+        const a = +m[1] + (+(m[2] ?? 0)) / 12;
+        const b = +m[3] + (+(m[4] ?? 0)) / 12;
+        const sq = a * b * SQFT_TO_SQM;
+        if (sq > 0.5 && sq < 500) sum += sq;
+      }
+      if (sum >= 10 && !kept.some((k) => Math.abs(k - sum) / k < 0.03)) kept.push(sum);
+    }
+    if (kept.length) areaSqm = Math.round(kept.reduce((s, v) => s + v, 0));
+  }
+
   if (areaSqm && (areaSqm < 10 || areaSqm > 100000)) areaSqm = null;
   return { areaSqm, lengthM, widthM, hasPool };
 }

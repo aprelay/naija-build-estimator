@@ -159,7 +159,7 @@ export function computeEstimate(input: EstimateInput): EstimateResult {
   const plumbingMaterial = builtArea * sr.plumbing;
   const finishingMaterial = builtArea * sr.finishing;
 
-  const l = LABOUR_RATES;
+  const l = admin.labour ?? LABOUR_RATES;
 
   const exc = excavationCost(admin.excavation, columns, floorArea, state);
 

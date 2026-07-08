@@ -370,6 +370,37 @@ export default function AdminPanel({ settings, onChange }: Props) {
       </section>
 
       <section className="card">
+        <h2>👷 Labour / Workmanship Rates (₦ per m²)</h2>
+        <p className="hint">Base workmanship rates per trade, scaled by area, state multiplier and stage factors.</p>
+        <div className="grid2">
+          {(
+            [
+              ["foundation", "Foundation works"],
+              ["concrete", "Concrete casting"],
+              ["blockwork", "Blockwork / masonry"],
+              ["roofing", "Roofing (per m² roof)"],
+              ["electrical", "Electrical installation"],
+              ["plumbing", "Plumbing & sanitary"],
+              ["plastering", "Plastering (per m² wall)"],
+              ["flooring", "Floor finishes"],
+              ["painting", "Painting"],
+              ["carpentry", "Carpentry & joinery"],
+              ["external", "External works"],
+            ] as [keyof typeof settings.labour, string][]
+          ).map(([key, label]) => (
+            <div className="field" key={key}>
+              <label>{label}</label>
+              <input
+                type="number"
+                value={settings.labour[key]}
+                onChange={(e) => update({ labour: { ...settings.labour, [key]: +e.target.value } })}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
         <h2>👁️ Trade Visibility</h2>
         <p className="hint">Hidden trades are excluded from the grand total and the estimate view.</p>
         {Object.entries(TRADE_LABELS).map(([key, label]) => {

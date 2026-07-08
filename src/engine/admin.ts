@@ -1,4 +1,6 @@
 // Developer-editable admin settings (persisted locally, like Odin's admin panel).
+import { LABOUR_RATES } from "./data";
+import type { LabourRates } from "./data";
 
 export interface GradeRates {
   label: string;
@@ -48,6 +50,7 @@ export interface AdminSettings {
   excavation: ExcavationSettings;
   tank: TankStandPrices;
   roofing: RoofingPrices;
+  labour: LabourRates;
   hiddenTrades: string[];
   activationCodes: string[];
 }
@@ -105,6 +108,7 @@ export const DEFAULT_ADMIN: AdminSettings = {
     nails: 850,
     sealant: 1200,
   },
+  labour: { ...LABOUR_RATES },
   hiddenTrades: [],
   activationCodes: [],
 };
@@ -128,6 +132,7 @@ export function loadAdminSettings(): AdminSettings {
         ...(parsed.roofing ?? {}),
         gauges: { ...DEFAULT_ADMIN.roofing.gauges, ...(parsed.roofing?.gauges ?? {}) },
       },
+      labour: { ...DEFAULT_ADMIN.labour, ...(parsed.labour ?? {}) },
     };
   } catch {
     return structuredClone(DEFAULT_ADMIN);

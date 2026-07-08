@@ -137,7 +137,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     }
     if (kept.length) {
       areaSqm = Math.round(kept.reduce((s, v) => s + v, 0));
-      if (!floors) floors = kept.length;
+      floors = Math.max(floors ?? 0, kept.length);
     }
   }
 

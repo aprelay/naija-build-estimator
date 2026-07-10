@@ -159,6 +159,8 @@ export default function App() {
   const [pricesLocked, setPricesLocked] = useState(false);
   const [exportsUsed, setExportsUsed] = useState(() => monthlyUsage());
   const [adminMode, setAdminMode] = useState(() => window.location.hash === "#admin");
+  const [pricePopOpen, setPricePopOpen] = useState(false);
+  const [pricesSeenAt, setPricesSeenAt] = useState(() => localStorage.getItem("nbe_prices_seen") || "");
 
   useEffect(() => {
     const onHash = () => setAdminMode(window.location.hash === "#admin");
@@ -518,7 +520,36 @@ export default function App() {
             <h1>Naija Build Estimator</h1>
             <p>Construction Cost & BOQ · Nigeria</p>
           </div>
+          {pro && marketPrices && marketUpdatedAt && (
+            <button
+              className="price-bell"
+              onClick={() => {
+                setPricePopOpen((o) => !o);
+                setPricesSeenAt(marketUpdatedAt);
+                localStorage.setItem("nbe_prices_seen", marketUpdatedAt);
+              }}
+            >
+              📈 Prices
+              {pricesSeenAt !== marketUpdatedAt && <span className="dot" />}
+            </button>
+          )}
         </div>
+        {pricePopOpen && pro && marketPrices && (
+          <div className="price-pop">
+            <h4>📈 Market prices — {state}</h4>
+            <p className="pop-date">Updated {fmtDate(new Date(marketUpdatedAt!))}</p>
+            <table>
+              <tbody>
+                {(Object.keys(PRICE_LABELS) as (keyof UnitPrices)[]).map((k) => (
+                  <tr key={k}>
+                    <td>{PRICE_LABELS[k]}</td>
+                    <td className="num">{formatNaira(marketPrices[k])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </header>
 
       <main className="content">

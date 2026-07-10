@@ -51,8 +51,11 @@ export default function AdminPanel({ settings, onChange }: Props) {
   if (!unlocked) {
     return (
       <section className="card">
-        <h2>🔐 Admin Access</h2>
-        <p className="hint">Enter PIN to unlock price management (default 1234 — change it inside).</p>
+        <h2>🔧 Advanced Rate Settings</h2>
+        <p className="hint">
+          Fine-tune your own account's rates (concrete grades, labour, excavation, roofing tiers). Protected by your
+          personal PIN — default 1234, change it inside. These settings affect only your account.
+        </p>
         <div className="field">
           <input
             type="password"

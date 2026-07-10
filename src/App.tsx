@@ -49,12 +49,41 @@ const PRICES_KEY = "nbe_prices";
 const PRICES_CUSTOM_KEY = "nbe_prices_custom";
 const BRAND_KEY = "nbe_branding";
 
-function loadBranding(): { companyName: string; companyPhone: string } {
+interface Branding {
+  companyName: string;
+  companyPhone: string;
+  companyLogo: string;
+}
+
+function loadBranding(): Branding {
   try {
-    return { companyName: "", companyPhone: "", ...JSON.parse(localStorage.getItem(BRAND_KEY) || "{}") };
+    return { companyName: "", companyPhone: "", companyLogo: "", ...JSON.parse(localStorage.getItem(BRAND_KEY) || "{}") };
   } catch {
-    return { companyName: "", companyPhone: "" };
+    return { companyName: "", companyPhone: "", companyLogo: "" };
   }
+}
+
+// Downscale an uploaded logo to a small PNG data URL so it fits in cloud storage.
+function fileToLogoDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 300;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image"));
+    };
+    img.src = url;
+  });
 }
 
 function loadHistory(): SavedEstimate[] {
@@ -166,7 +195,7 @@ export default function App() {
           data: {
             prices?: UnitPrices;
             custom?: boolean;
-            branding?: { companyName: string; companyPhone: string };
+            branding?: Branding;
             history?: SavedEstimate[];
             adminSettings?: AdminSettings;
           } | null;
@@ -418,6 +447,41 @@ export default function App() {
   const topTrade = result
     ? [...result.trades].sort((a, b) => b.total - a.total)[0]
     : null;
+
+  if (!session) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="logo">🏗️</span>
+            <div>
+              <h1>Naija Build Estimator</h1>
+              <p>Construction Cost & BOQ · Nigeria</p>
+            </div>
+          </div>
+        </header>
+        <main className="content">
+          <section className="card">
+            <h2>👋 Welcome</h2>
+            <p className="hint">
+              Instant construction cost estimates, BOQs, timelines and floor-plan analysis for Nigeria. Create a free
+            account or log in to continue.
+            </p>
+          </section>
+          <AccountPanel session={null} onSession={onSession} />
+          {adminMode && (
+            <SuperAdmin
+              prices={prices}
+              onPublished={(p, updatedAt) => {
+                setMarketPrices({ ...DEFAULT_PRICES, ...p });
+                setMarketUpdatedAt(updatedAt);
+              }}
+            />
+          )}
+        </main>
+      </div>
+    );
+  }
 
   if (session?.user.locked) {
     return (
@@ -906,6 +970,7 @@ export default function App() {
                     exportEstimatePdf(input, result, projectName, {
                       companyName: pro ? branding.companyName : "",
                       companyPhone: pro ? branding.companyPhone : "",
+                      companyLogo: pro ? branding.companyLogo : "",
                       pricesAsOf: marketUpdatedAt,
                       watermark: !pro,
                     });
@@ -1025,6 +1090,31 @@ export default function App() {
                   onChange={(e) => setBranding((b) => ({ ...b, companyPhone: e.target.value }))}
                   placeholder="e.g. 0803 123 4567"
                 />
+              </div>
+              <div className="field">
+                <label>Company Logo (shown on PDF header)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    try {
+                      const logo = await fileToLogoDataUrl(f);
+                      setBranding((b) => ({ ...b, companyLogo: logo }));
+                    } catch {
+                      /* unreadable image — ignore */
+                    }
+                  }}
+                />
+                {branding.companyLogo && (
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 12 }}>
+                    <img src={branding.companyLogo} alt="Company logo" style={{ height: 44, borderRadius: 6 }} />
+                    <button className="secondary" onClick={() => setBranding((b) => ({ ...b, companyLogo: "" }))}>
+                      Remove logo
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </section>

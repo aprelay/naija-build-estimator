@@ -11,6 +11,7 @@ function subtypeLabel(input: EstimateInput): string {
 export interface PdfBranding {
   companyName?: string;
   companyPhone?: string;
+  companyLogo?: string;
   pricesAsOf?: string | null;
   watermark?: boolean;
 }
@@ -48,6 +49,16 @@ export function exportEstimatePdf(
   doc.setFontSize(20);
   doc.setFont("helvetica", "bold");
   doc.text(branding.companyName || "Naija Build Estimator", margin, 34);
+  if (branding.companyLogo) {
+    try {
+      const props = doc.getImageProperties(branding.companyLogo);
+      const h = 46;
+      const w = (props.width / props.height) * h;
+      doc.addImage(branding.companyLogo, "PNG", pageW - margin - w, 12, w, h);
+    } catch {
+      // invalid logo image — skip
+    }
+  }
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
   doc.text(

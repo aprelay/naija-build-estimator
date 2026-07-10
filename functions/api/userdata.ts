@@ -4,7 +4,7 @@ import { bearerToken, EventContext, getUser, json, verifyToken } from "../_lib";
 // history, settings). Each account's data lives under its own key — never
 // shared between users.
 
-const MAX_BYTES = 200_000;
+const MAX_BYTES = 800_000;
 
 export async function onRequestGet(ctx: EventContext): Promise<Response> {
   const email = await verifyToken(ctx.env.ADMIN_KEY, bearerToken(ctx.request));

@@ -110,7 +110,7 @@ function hasCustomPrices(): boolean {
   return localStorage.getItem(PRICES_CUSTOM_KEY) === "1";
 }
 
-type Tab = "estimate" | "timeline" | "prices" | "history" | "account";
+type Tab = "estimate" | "timeline" | "prices" | "suppliers" | "history" | "account";
 
 function addWeeks(dateStr: string, weeks: number): Date {
   const d = new Date(dateStr + "T00:00:00");
@@ -1182,7 +1182,7 @@ export default function App() {
           </section>
         )}
 
-        {tab === "prices" && <SuppliersDirectory session={session} pro={pro} />}
+        {tab === "suppliers" && <SuppliersDirectory session={session} pro={pro} />}
 
         {tab === "prices" && <AdminPanel settings={adminSettings} onChange={setAdminSettings} />}
 
@@ -1232,6 +1232,9 @@ export default function App() {
         </button>
         <button className={tab === "prices" ? "on" : ""} onClick={() => setTab("prices")}>
           ⚙️<span>Prices</span>
+        </button>
+        <button className={tab === "suppliers" ? "on" : ""} onClick={() => setTab("suppliers")}>
+          🏪<span>Suppliers</span>
         </button>
         <button className={tab === "history" ? "on" : ""} onClick={() => setTab("history")}>
           📚<span>History</span>

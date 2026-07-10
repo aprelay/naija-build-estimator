@@ -15,6 +15,49 @@ export interface PlanExtraction {
 
 const num = (s: string) => parseFloat(s.replace(/,/g, ""));
 const SQFT_TO_SQM = 0.09290304;
+const FT_TO_M = 0.3048;
+
+interface PosItem {
+  v: number; // metres
+  x: number;
+  y: number;
+  page: number;
+}
+
+// Numbers aligned in a row sum to a width, in a column to a depth; clusters
+// split on large positional gaps (side-by-side floor plans on one sheet).
+function chainSums(items: PosItem[], key: "x" | "y", other: "x" | "y"): number[] {
+  const groups = new Map<string, PosItem[]>();
+  for (const it of items) {
+    const gk = `${it.page}:${Math.round(it[key] / 6)}`;
+    (groups.get(gk) ?? groups.set(gk, []).get(gk)!).push(it);
+  }
+  const sums: number[] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => a[other] - b[other]);
+    const gaps = g.slice(1).map((it, i) => it[other] - g[i][other]);
+    const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    let cluster: number[] = [g[0].v];
+    for (let i = 1; i < g.length; i++) {
+      if (gaps[i - 1] > Math.max(2.5 * median, 150)) {
+        if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
+        cluster = [];
+      }
+      cluster.push(g[i].v);
+    }
+    if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
+  }
+  return sums.filter((s) => s >= 4 && s <= 60);
+}
+
+function envelopeArea(items: PosItem[], floors: number): number | null {
+  const widths = chainSums(items, "y", "x");
+  const depths = chainSums(items, "x", "y");
+  if (!widths.length || !depths.length) return null;
+  const perFloor = Math.max(...widths) * Math.max(...depths);
+  return perFloor >= 20 && perFloor <= 2000 ? Math.round(perFloor * floors) : null;
+}
 
 function svgText(svg: string): string {
   // Concatenate the inner text of each <text> element (tspans fragment words).
@@ -29,12 +72,16 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     throw new Error("Only PDF or SVG floor plans can be parsed — images have no readable text. Enter details manually.");
   }
   let text = "";
-  const numItems: { v: number; x: number; y: number; page: number }[] = [];
+  const numItems: PosItem[] = []; // metre-scale dimension figures
+  const mmItems: PosItem[] = []; // millimetre dimension / grid-bay figures
+  const ftItems: PosItem[] = []; // feet-inch dimension figures
+  let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
   if (isSvg) {
     text = svgText(await file.text());
   } else {
     const buf = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    pdfDoc = doc;
     const pages = Math.min(doc.numPages, 20);
     for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
@@ -44,9 +91,21 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
           .map((it) => ("str" in it ? it.str : ""))
           .join(" ") + "\n";
       for (const it of content.items) {
-        if ("str" in it && /^\s*\d{1,2}(?:\.\d{1,2})?\s*$/.test(it.str)) {
-          const v = parseFloat(it.str);
-          if (v >= 0.5 && v <= 20) numItems.push({ v, x: it.transform[4], y: it.transform[5], page: i });
+        if (!("str" in it)) continue;
+        const s = it.str.trim();
+        const pos = { x: it.transform[4], y: it.transform[5], page: i };
+        if (/^\d{1,2}(?:\.\d{1,2})?$/.test(s)) {
+          const v = parseFloat(s);
+          if (v >= 0.5 && v <= 20) numItems.push({ v, ...pos });
+        } else if (/^\d{3,5}$/.test(s)) {
+          const v = parseInt(s, 10) / 1000;
+          if (v >= 0.5 && v <= 20) mmItems.push({ v, ...pos });
+        } else {
+          const ft = s.match(/^(\d{1,3})'(?:-?(\d{1,2})(?:\s*\d\/\d)?")?$/);
+          if (ft) {
+            const v = (+ft[1] + (+(ft[2] ?? 0)) / 12) * FT_TO_M;
+            if (v >= 0.5 && v <= 30) ftItems.push({ v, ...pos });
+          }
         }
       }
     }
@@ -76,10 +135,14 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     if (areaSqm >= 10 && areaSqm <= 100000) return { areaSqm, lengthM: null, widthM: null, hasPool, floors };
   }
 
-  // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²"
-  const areaMatch = text.match(
-    /(?:total|floor|plan|gross|built|site)?\s*area[^0-9]{0,12}([\d,]{2,7}(?:\.\d{1,3})?)\s*(?:sq\.?\s*m|sqm|m²|m2|square met)/i,
-  );
+  // e.g. "TOTAL AREA: 250 sqm", "Floor area 250.5 m2", "GFA 300m²", plus
+  // title-block fields: "BUILT-UP AREA", "B.U.A. 250", "PLINTH AREA", "CARPET AREA"
+  const areaMatch =
+    text.match(
+      /(?:total|floor|plan|gross|built[- ]?up|plinth|carpet|site)?\s*area[^0-9]{0,12}([\d,]{2,7}(?:\.\d{1,3})?)\s*(?:sq\.?\s*m|sqm|m²|m2|square met)/i,
+    ) ??
+    text.match(/\bB\.?U\.?A\.?[^0-9a-z]{0,8}([\d,]{2,7}(?:\.\d{1,3})?)\s*(?:sq\.?\s*m|sqm|m2)?\b/i) ??
+    text.match(/\bG\.?F\.?A\.?[^0-9a-z]{0,8}([\d,]{2,7}(?:\.\d{1,3})?)\s*(?:sq\.?\s*m|sqm|m2)?\b/i);
 
   // e.g. "20m x 15m", "20.5 × 15"
   const dimMatch = text.match(
@@ -124,40 +187,18 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
       }
     }
   }
-  // Metre-scale drawings with only dimension chains along the edges and no
-  // stated area: reconstruct the footprint from the positions of the dimension
-  // figures — numbers aligned in a row sum to the width, in a column to the
-  // depth. Take the largest chain on each axis as the overall envelope.
-  if (!areaSqm && numItems.length >= 4 && /floor\s*plan/i.test(text) && /scale\s*1\s*:\s*\d+\s*m/i.test(text)) {
-    const chainSums = (items: typeof numItems, key: "x" | "y", other: "x" | "y") => {
-      const groups = new Map<string, typeof numItems>();
-      for (const it of items) {
-        const gk = `${it.page}:${Math.round(it[key] / 6)}`;
-        (groups.get(gk) ?? groups.set(gk, []).get(gk)!).push(it);
+  // Dimension chains along the drawing edges with no stated area: reconstruct
+  // the footprint from the positions of the dimension figures. Works for
+  // metre chains (4.5 2.2 4.8), millimetre / grid-bay chains (4500 2200…),
+  // and feet-inch chains (12'-6" 10'-0"…).
+  if (!areaSqm && /floor\s*plan/i.test(text)) {
+    for (const items of [numItems, mmItems, ftItems]) {
+      if (items.length < 4) continue;
+      const a = envelopeArea(items, floors ?? 1);
+      if (a) {
+        areaSqm = a;
+        break;
       }
-      const sums: number[] = [];
-      for (const g of groups.values()) {
-        if (g.length < 2) continue;
-        g.sort((a, b) => a[other] - b[other]);
-        const gaps = g.slice(1).map((it, i) => it[other] - g[i][other]);
-        const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
-        let cluster: number[] = [g[0].v];
-        for (let i = 1; i < g.length; i++) {
-          if (gaps[i - 1] > Math.max(2.5 * median, 150)) {
-            if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
-            cluster = [];
-          }
-          cluster.push(g[i].v);
-        }
-        if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
-      }
-      return sums.filter((s) => s >= 4 && s <= 60);
-    };
-    const widths = chainSums(numItems, "y", "x");
-    const depths = chainSums(numItems, "x", "y");
-    if (widths.length && depths.length) {
-      const perFloor = Math.max(...widths) * Math.max(...depths);
-      if (perFloor >= 20 && perFloor <= 2000) areaSqm = Math.round(perFloor * (floors ?? 1));
     }
   }
 
@@ -182,6 +223,60 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     if (kept.length) {
       areaSqm = Math.round(kept.reduce((s, v) => s + v, 0));
       floors = Math.max(floors ?? 0, kept.length);
+    }
+  }
+
+  // Site plans stating plot dims and setbacks only: building envelope = plot
+  // minus setbacks on each side.
+  if (!areaSqm && lengthM && widthM) {
+    const setbacks = [...text.matchAll(/set\s*-?backs?[^0-9]{0,15}(\d{1,2}(?:\.\d{1,2})?)\s*m/gi)].map((m) => parseFloat(m[1]));
+    if (setbacks.length) {
+      const s = setbacks.reduce((a, b) => a + b, 0) / setbacks.length;
+      const a = Math.round((lengthM - 2 * s) * (widthM - 2 * s));
+      if (a >= 20) areaSqm = a;
+    }
+  }
+
+  // Prose descriptions, e.g. "…BUNGALOW ON 450 sqm PLOT" — plot size as a
+  // last-resort stand-in for the footprint (flagged for user review).
+  if (!areaSqm) {
+    const prose = text.match(/([\d,]{2,7}(?:\.\d{1,2})?)\s*(?:sqm|m2|sq\.?\s*m)\s*(?:plot|site|land|lot)/i);
+    if (prose) areaSqm = Math.round(num(prose[1]));
+  }
+
+  // Vector fallback: no readable dimensions at all, but a stated drawing scale
+  // — measure the drawn geometry itself. Uses the bounding box of the page's
+  // vector paths (ignoring near-page-size frames) scaled by 1:N.
+  const scaleMatch = text.match(/scale\s*[^0-9]{0,6}1\s*:\s*(\d{2,4})/i);
+  if (!areaSqm && pdfDoc && scaleMatch) {
+    const scaleN = parseInt(scaleMatch[1], 10);
+    try {
+      const page = await pdfDoc.getPage(1);
+      const view = page.view; // [x0, y0, x1, y1] in pdf units
+      const pw = view[2] - view[0];
+      const ph = view[3] - view[1];
+      const ops = await page.getOperatorList();
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < ops.fnArray.length; i++) {
+        if (ops.fnArray[i] !== pdfjsLib.OPS.constructPath) continue;
+        const arg = ops.argsArray[i] as unknown[];
+        const minMax = arg[2] as number[] | undefined;
+        if (!minMax || minMax.length < 4 || !isFinite(minMax[0])) continue;
+        const [x0, y0, x1, y1] = minMax;
+        // Skip near-page-size boxes (sheet frames / title-block borders).
+        if (x1 - x0 > 0.85 * pw && y1 - y0 > 0.85 * ph) continue;
+        minX = Math.min(minX, x0); minY = Math.min(minY, y0);
+        maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1);
+      }
+      if (isFinite(minX)) {
+        const toM = (u: number) => (u / 72) * 0.0254 * scaleN;
+        const w = toM(maxX - minX);
+        const h = toM(maxY - minY);
+        const perFloor = w * h;
+        if (perFloor >= 20 && perFloor <= 5000) areaSqm = Math.round(perFloor * (floors ?? 1));
+      }
+    } catch {
+      // vector inspection is best-effort
     }
   }
 

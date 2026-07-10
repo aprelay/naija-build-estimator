@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { STATES } from "./engine/data";
-import {
-  generateActivationCode,
-  saveAdminSettings,
-} from "./engine/admin";
+import { saveAdminSettings } from "./engine/admin";
 import type { AdminSettings, GradeKey } from "./engine/admin";
 
 const GRADE_KEYS: GradeKey[] = ["grade20", "grade25", "grade30", "grade35"];
@@ -45,6 +42,46 @@ export default function AdminPanel({ settings, onChange }: Props) {
   const [pinStatus, setPinStatus] = useState("");
   const [overrideState, setOverrideState] = useState("Lagos");
   const [codeCount, setCodeCount] = useState(1);
+  const [codeMonths, setCodeMonths] = useState(1);
+  const [codeAdminKey, setCodeAdminKey] = useState("");
+  const [codeStatus, setCodeStatus] = useState("");
+  const [issuedCodes, setIssuedCodes] = useState<{ code: string; months: number; usedBy: string | null }[]>([]);
+
+  async function generateCodes() {
+    setCodeStatus("Generating…");
+    try {
+      const res = await fetch("/api/codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${codeAdminKey}` },
+        body: JSON.stringify({ months: codeMonths, count: codeCount }),
+      });
+      const data = (await res.json()) as { codes?: string[]; error?: string };
+      if (!res.ok || !data.codes) {
+        setCodeStatus(`Failed: ${data.error ?? res.status}`);
+        return;
+      }
+      setIssuedCodes((prev) => [...data.codes!.map((code) => ({ code, months: codeMonths, usedBy: null })), ...prev]);
+      setCodeStatus(`Generated ${data.codes.length} code(s) — send after payment is confirmed.`);
+    } catch {
+      setCodeStatus("Failed: network error");
+    }
+  }
+
+  async function listCodes() {
+    setCodeStatus("Loading…");
+    try {
+      const res = await fetch("/api/codes", { headers: { Authorization: `Bearer ${codeAdminKey}` } });
+      const data = (await res.json()) as { codes?: { code: string; months: number; usedBy: string | null }[]; error?: string };
+      if (!res.ok || !data.codes) {
+        setCodeStatus(`Failed: ${data.error ?? res.status}`);
+        return;
+      }
+      setIssuedCodes(data.codes);
+      setCodeStatus(`${data.codes.length} code(s) issued.`);
+    } catch {
+      setCodeStatus("Failed: network error");
+    }
+  }
 
   function update(patch: Partial<AdminSettings>) {
     const next = { ...settings, ...patch };
@@ -454,35 +491,49 @@ export default function AdminPanel({ settings, onChange }: Props) {
       </section>
 
       <section className="card">
-        <h2>🔑 Activation Codes</h2>
+        <h2>🔑 Pro Activation Codes</h2>
         <p className="hint">
-          Generate one-time codes for customers. Note: this app has no paywall, so codes are for your own
-          record-keeping / manual licensing.
+          Invoice the client, receive the bank transfer, then generate a one-time code here and send it to them.
+          Redeeming it in their Account tab activates Pro for the months you choose.
         </p>
+        <div className="field">
+          <label>Admin key</label>
+          <input
+            type="password"
+            value={codeAdminKey}
+            onChange={(e) => setCodeAdminKey(e.target.value)}
+            placeholder="Same key used to publish prices"
+          />
+        </div>
         <div className="grid2">
           <div className="field">
-            <label>How many</label>
-            <input type="number" value={codeCount} min={1} onChange={(e) => setCodeCount(Math.max(1, +e.target.value))} />
+            <label>Months of Pro</label>
+            <input type="number" value={codeMonths} min={1} max={36} onChange={(e) => setCodeMonths(Math.max(1, +e.target.value))} />
           </div>
           <div className="field">
-            <label>&nbsp;</label>
-            <button
-              className="primary"
-              onClick={() => {
-                const start = settings.activationCodes.length + 1;
-                const codes = Array.from({ length: codeCount }, (_, i) => generateActivationCode(start + i));
-                update({ activationCodes: [...settings.activationCodes, ...codes] });
-              }}
-            >
-              Generate
-            </button>
+            <label>How many codes</label>
+            <input type="number" value={codeCount} min={1} max={50} onChange={(e) => setCodeCount(Math.max(1, +e.target.value))} />
           </div>
         </div>
-        {settings.activationCodes.length > 0 && (
+        <button className="primary" onClick={generateCodes} disabled={!codeAdminKey}>
+          Generate
+        </button>
+        <button className="secondary" onClick={listCodes} disabled={!codeAdminKey} style={{ marginLeft: 8 }}>
+          View issued codes
+        </button>
+        {codeStatus && <p className="hint">{codeStatus}</p>}
+        {issuedCodes.length > 0 && (
           <table className="trades">
+            <thead>
+              <tr><th>Code</th><th>Months</th><th>Status</th></tr>
+            </thead>
             <tbody>
-              {settings.activationCodes.map((c) => (
-                <tr key={c}><td>{c}</td></tr>
+              {issuedCodes.map((c) => (
+                <tr key={c.code}>
+                  <td>{c.code}</td>
+                  <td>{c.months}</td>
+                  <td>{c.usedBy ? `Used by ${c.usedBy}` : "Unused"}</td>
+                </tr>
               ))}
             </tbody>
           </table>

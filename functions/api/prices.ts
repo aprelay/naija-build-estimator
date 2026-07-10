@@ -1,17 +1,4 @@
-interface KVNamespace {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string): Promise<void>;
-}
-
-interface Env {
-  PRICES_KV: KVNamespace;
-  ADMIN_KEY: string;
-}
-
-interface EventContext {
-  request: Request;
-  env: Env;
-}
+import { bearerToken, EventContext, getUser, isPro, JSON_HEADERS, json, verifyToken } from "../_lib";
 
 const PRICE_KEYS = ["cement", "steel", "sand", "granite", "block", "roofingSheet"] as const;
 const KV_KEY = "prices";
@@ -22,11 +9,6 @@ function kvKeyFor(state: string | null): string {
   return clean ? `${KV_KEY}:${clean.toLowerCase()}` : KV_KEY;
 }
 
-const JSON_HEADERS = {
-  "Content-Type": "application/json",
-  "Cache-Control": "no-store",
-};
-
 export async function onRequestGet(ctx: EventContext): Promise<Response> {
   const state = new URL(ctx.request.url).searchParams.get("state");
   const stateKey = kvKeyFor(state);
@@ -35,7 +17,15 @@ export async function onRequestGet(ctx: EventContext): Promise<Response> {
     (stateKey !== KV_KEY ? await ctx.env.PRICES_KV.get(stateKey) : null) ??
     (await ctx.env.PRICES_KV.get(KV_KEY));
   if (!stored) {
-    return new Response(JSON.stringify({ prices: null, updatedAt: null }), { headers: JSON_HEADERS });
+    return json({ prices: null, updatedAt: null });
+  }
+  // Current market prices are a Pro feature: free users see when prices were
+  // last published, but not the figures themselves.
+  const email = await verifyToken(ctx.env.ADMIN_KEY, bearerToken(ctx.request));
+  const user = email ? await getUser(ctx.env.PRICES_KV, email) : null;
+  if (!isPro(user)) {
+    const { updatedAt } = JSON.parse(stored) as { updatedAt: string | null };
+    return json({ prices: null, updatedAt, locked: true });
   }
   return new Response(stored, { headers: JSON_HEADERS });
 }
@@ -43,22 +33,19 @@ export async function onRequestGet(ctx: EventContext): Promise<Response> {
 export async function onRequestPut(ctx: EventContext): Promise<Response> {
   const auth = ctx.request.headers.get("Authorization") || "";
   if (!ctx.env.ADMIN_KEY || auth !== `Bearer ${ctx.env.ADMIN_KEY}`) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: JSON_HEADERS });
+    return json({ error: "Unauthorized" }, 401);
   }
   let body: Record<string, unknown>;
   try {
     body = await ctx.request.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400, headers: JSON_HEADERS });
+    return json({ error: "Invalid JSON" }, 400);
   }
   const prices: Record<string, number> = {};
   for (const key of PRICE_KEYS) {
     const v = body[key];
     if (typeof v !== "number" || !isFinite(v) || v <= 0) {
-      return new Response(JSON.stringify({ error: `Invalid or missing price: ${key}` }), {
-        status: 400,
-        headers: JSON_HEADERS,
-      });
+      return json({ error: `Invalid or missing price: ${key}` }, 400);
     }
     prices[key] = v;
   }

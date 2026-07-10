@@ -23,6 +23,17 @@ import { extractPlan } from "./engine/plan";
 import { loadAdminSettings } from "./engine/admin";
 import type { AdminSettings } from "./engine/admin";
 import AdminPanel from "./AdminPanel";
+import AccountPanel from "./AccountPanel";
+import {
+  FREE_MONTHLY_LIMIT,
+  isProSession,
+  loadSession,
+  monthlyUsage,
+  recordUsage,
+  refreshMe,
+  saveSession,
+} from "./engine/auth";
+import type { AuthSession } from "./engine/auth";
 
 interface SavedEstimate {
   id: string;
@@ -66,7 +77,7 @@ function hasCustomPrices(): boolean {
   return localStorage.getItem(PRICES_CUSTOM_KEY) === "1";
 }
 
-type Tab = "estimate" | "timeline" | "prices" | "history";
+type Tab = "estimate" | "timeline" | "prices" | "history" | "account";
 
 function addWeeks(dateStr: string, weeks: number): Date {
   const d = new Date(dateStr + "T00:00:00");
@@ -117,6 +128,26 @@ export default function App() {
   const [contingencyPct, setContingencyPct] = useState("10");
   const [branding, setBranding] = useState(loadBranding());
   const [publishState, setPublishState] = useState("");
+  const [session, setSession] = useState<AuthSession | null>(() => loadSession());
+  const [pricesLocked, setPricesLocked] = useState(false);
+  const [exportsUsed, setExportsUsed] = useState(() => monthlyUsage());
+
+  const pro = isProSession(session);
+
+  function onSession(s: AuthSession | null) {
+    saveSession(s);
+    setSession(s);
+  }
+
+  // Re-check the plan on load (e.g. Pro expired or was activated on another device).
+  useEffect(() => {
+    const s = loadSession();
+    if (!s) return;
+    refreshMe(s).then((user) => {
+      if (user) onSession({ ...s, user });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(BRAND_KEY, JSON.stringify(branding));
@@ -126,19 +157,26 @@ export default function App() {
     localStorage.setItem(PRICES_KEY, JSON.stringify(prices));
   }, [prices]);
 
-  // Load market prices for the selected state (state-specific set falls back to national).
+  // Load market prices for the selected state (state-specific set falls back to
+  // national). Current market prices are a Pro feature — free users keep the
+  // built-in defaults.
   useEffect(() => {
-    fetch(`/api/prices?state=${encodeURIComponent(state)}`)
+    fetch(`/api/prices?state=${encodeURIComponent(state)}`, {
+      headers: session ? { Authorization: `Bearer ${session.token}` } : {},
+    })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { prices: UnitPrices | null; updatedAt: string | null } | null) => {
-        if (!data?.prices) return;
+      .then((data: { prices: UnitPrices | null; updatedAt: string | null; locked?: boolean } | null) => {
+        if (!data) return;
+        setPricesLocked(!!data.locked);
+        if (data.locked) setMarketUpdatedAt(data.updatedAt);
+        if (!data.prices) return;
         const merged = { ...DEFAULT_PRICES, ...data.prices };
         setMarketPrices(merged);
         setMarketUpdatedAt(data.updatedAt);
         if (!hasCustomPrices()) setPrices(merged);
       })
       .catch(() => {});
-  }, [state]);
+  }, [state, session]);
 
   function editPrice(k: keyof UnitPrices, value: number) {
     localStorage.setItem(PRICES_CUSTOM_KEY, "1");
@@ -382,9 +420,17 @@ export default function App() {
                   {state} · excl. VAT
                   {topTrade && ` · Top: ${topTrade.label} (${Math.round((topTrade.total / result.total) * 100)}%)`}
                 </div>
-                {marketUpdatedAt && (
+                {marketUpdatedAt && !pricesLocked && (
                   <div className="total-meta">
                     📈 Market prices as of {new Date(marketUpdatedAt).toLocaleDateString("en-NG")}
+                  </div>
+                )}
+                {pricesLocked && (
+                  <div className="total-meta">
+                    🔒 Using default prices — live market prices (updated{" "}
+                    {marketUpdatedAt ? new Date(marketUpdatedAt).toLocaleDateString("en-NG") : "monthly"}) are a Pro
+                    feature.{" "}
+                    <a href="#" onClick={(e) => { e.preventDefault(); setTab("account"); }}>Upgrade</a>
                   </div>
                 )}
               </section>
@@ -787,15 +833,21 @@ export default function App() {
               <div className="actions">
                 <button
                   className="primary"
-                  onClick={() =>
+                  onClick={() => {
+                    if (!pro && exportsUsed >= FREE_MONTHLY_LIMIT) {
+                      setTab("account");
+                      return;
+                    }
                     exportEstimatePdf(input, result, projectName, {
-                      companyName: branding.companyName,
-                      companyPhone: branding.companyPhone,
+                      companyName: pro ? branding.companyName : "",
+                      companyPhone: pro ? branding.companyPhone : "",
                       pricesAsOf: marketUpdatedAt,
-                    })
-                  }
+                      watermark: !pro,
+                    });
+                    if (!pro) setExportsUsed(recordUsage());
+                  }}
                 >
-                  📄 Download PDF
+                  📄 Download PDF{!pro ? ` (${Math.max(FREE_MONTHLY_LIMIT - exportsUsed, 0)} free left)` : ""}
                 </button>
                 <button className="secondary" onClick={shareWhatsApp}>
                   💬 Share on WhatsApp
@@ -944,6 +996,8 @@ export default function App() {
 
         {tab === "prices" && <AdminPanel settings={adminSettings} onChange={setAdminSettings} />}
 
+        {tab === "account" && <AccountPanel session={session} onSession={onSession} />}
+
         {tab === "history" && (
           <section className="card">
             <h2>📚 Saved Estimates</h2>
@@ -978,6 +1032,9 @@ export default function App() {
         </button>
         <button className={tab === "history" ? "on" : ""} onClick={() => setTab("history")}>
           📚<span>History</span>
+        </button>
+        <button className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>
+          👤<span>{pro ? "Pro ⭐" : "Account"}</span>
         </button>
       </nav>
     </div>

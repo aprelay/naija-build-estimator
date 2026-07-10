@@ -12,6 +12,23 @@ export interface PdfBranding {
   companyName?: string;
   companyPhone?: string;
   pricesAsOf?: string | null;
+  watermark?: boolean;
+}
+
+function stampWatermark(doc: jsPDF) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setTextColor(210, 210, 210);
+    doc.setFontSize(46);
+    doc.setFont("helvetica", "bold");
+    doc.text("FREE PLAN — naija-build-estimator.pages.dev", pageW / 2, pageH / 2, {
+      align: "center",
+      angle: 35,
+    });
+  }
 }
 
 export function exportEstimatePdf(
@@ -152,6 +169,8 @@ export function exportEstimatePdf(
     y,
     { maxWidth: pageW - margin * 2 },
   );
+
+  if (branding.watermark) stampWatermark(doc);
 
   const filename = `${(projectName || "estimate").replace(/[^a-z0-9]+/gi, "_")}.pdf`;
   doc.save(filename);

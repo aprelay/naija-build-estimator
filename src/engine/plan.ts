@@ -29,6 +29,7 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
     throw new Error("Only PDF or SVG floor plans can be parsed — images have no readable text. Enter details manually.");
   }
   let text = "";
+  const numItems: { v: number; x: number; y: number; page: number }[] = [];
   if (isSvg) {
     text = svgText(await file.text());
   } else {
@@ -42,6 +43,12 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
         content.items
           .map((it) => ("str" in it ? it.str : ""))
           .join(" ") + "\n";
+      for (const it of content.items) {
+        if ("str" in it && /^\s*\d{1,2}(?:\.\d{1,2})?\s*$/.test(it.str)) {
+          const v = parseFloat(it.str);
+          if (v >= 0.5 && v <= 20) numItems.push({ v, x: it.transform[4], y: it.transform[5], page: i });
+        }
+      }
     }
   }
 
@@ -117,6 +124,43 @@ export async function extractPlan(file: File): Promise<PlanExtraction> {
       }
     }
   }
+  // Metre-scale drawings with only dimension chains along the edges and no
+  // stated area: reconstruct the footprint from the positions of the dimension
+  // figures — numbers aligned in a row sum to the width, in a column to the
+  // depth. Take the largest chain on each axis as the overall envelope.
+  if (!areaSqm && numItems.length >= 4 && /floor\s*plan/i.test(text) && /scale\s*1\s*:\s*\d+\s*m/i.test(text)) {
+    const chainSums = (items: typeof numItems, key: "x" | "y", other: "x" | "y") => {
+      const groups = new Map<string, typeof numItems>();
+      for (const it of items) {
+        const gk = `${it.page}:${Math.round(it[key] / 6)}`;
+        (groups.get(gk) ?? groups.set(gk, []).get(gk)!).push(it);
+      }
+      const sums: number[] = [];
+      for (const g of groups.values()) {
+        if (g.length < 2) continue;
+        g.sort((a, b) => a[other] - b[other]);
+        const gaps = g.slice(1).map((it, i) => it[other] - g[i][other]);
+        const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+        let cluster: number[] = [g[0].v];
+        for (let i = 1; i < g.length; i++) {
+          if (gaps[i - 1] > Math.max(2.5 * median, 150)) {
+            if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
+            cluster = [];
+          }
+          cluster.push(g[i].v);
+        }
+        if (cluster.length >= 2) sums.push(cluster.reduce((s, v) => s + v, 0));
+      }
+      return sums.filter((s) => s >= 4 && s <= 60);
+    };
+    const widths = chainSums(numItems, "y", "x");
+    const depths = chainSums(numItems, "x", "y");
+    if (widths.length && depths.length) {
+      const perFloor = Math.max(...widths) * Math.max(...depths);
+      if (perFloor >= 20 && perFloor <= 2000) areaSqm = Math.round(perFloor * (floors ?? 1));
+    }
+  }
+
   // Imperial drawings with only per-room dimensions (11'-6" X 17'-3") and no
   // stated area: sum the room areas per page. Pages whose totals are within 3%
   // of an earlier page are alternative options of the same floor — count once.

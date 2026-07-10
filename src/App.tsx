@@ -129,6 +129,13 @@ export default function App() {
   const [session, setSession] = useState<AuthSession | null>(() => loadSession());
   const [pricesLocked, setPricesLocked] = useState(false);
   const [exportsUsed, setExportsUsed] = useState(() => monthlyUsage());
+  const [adminMode, setAdminMode] = useState(() => window.location.hash === "#admin");
+
+  useEffect(() => {
+    const onHash = () => setAdminMode(window.location.hash === "#admin");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   const pro = isProSession(session);
 
@@ -1028,13 +1035,15 @@ export default function App() {
         {tab === "account" && (
           <>
             <AccountPanel session={session} onSession={onSession} />
-            <SuperAdmin
-              prices={prices}
-              onPublished={(p, updatedAt) => {
-                setMarketPrices({ ...DEFAULT_PRICES, ...p });
-                setMarketUpdatedAt(updatedAt);
-              }}
-            />
+            {adminMode && (
+              <SuperAdmin
+                prices={prices}
+                onPublished={(p, updatedAt) => {
+                  setMarketPrices({ ...DEFAULT_PRICES, ...p });
+                  setMarketUpdatedAt(updatedAt);
+                }}
+              />
+            )}
           </>
         )}
 

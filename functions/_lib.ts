@@ -22,6 +22,7 @@ export interface UserRecord {
   hash: string;
   proUntil: string | null;
   createdAt: string;
+  locked?: boolean;
 }
 
 export interface CodeRecord {
@@ -110,5 +111,11 @@ export function publicProfile(user: UserRecord) {
     email: user.email,
     plan: isPro(user) ? "pro" : "free",
     proUntil: user.proUntil,
+    locked: !!user.locked,
   };
+}
+
+export function isAdminRequest(ctx: EventContext): boolean {
+  const auth = ctx.request.headers.get("Authorization") || "";
+  return !!ctx.env.ADMIN_KEY && auth === `Bearer ${ctx.env.ADMIN_KEY}`;
 }

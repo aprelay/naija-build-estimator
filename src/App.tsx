@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   BLOCK_OPTIONS,
   DEFAULT_PRICES,
@@ -20,10 +20,11 @@ import type { EstimateInput } from "./engine/estimate";
 import { exportEstimatePdf } from "./engine/pdf";
 import { computeTimeline, totalWeeks } from "./engine/timeline";
 import { extractPlan } from "./engine/plan";
-import { loadAdminSettings } from "./engine/admin";
+import { loadAdminSettings, saveAdminSettings } from "./engine/admin";
 import type { AdminSettings } from "./engine/admin";
 import AdminPanel from "./AdminPanel";
 import AccountPanel from "./AccountPanel";
+import SuperAdmin from "./SuperAdmin";
 import {
   FREE_MONTHLY_LIMIT,
   isProSession,
@@ -113,8 +114,6 @@ export default function App() {
   const [prices, setPrices] = useState<UnitPrices>(loadPrices());
   const [marketPrices, setMarketPrices] = useState<UnitPrices | null>(null);
   const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
-  const [adminKey, setAdminKey] = useState("");
-  const [publishStatus, setPublishStatus] = useState("");
   const [currency, setCurrency] = useState<string>("NGN");
   const [history, setHistory] = useState<SavedEstimate[]>(loadHistory());
   const [openTrades, setOpenTrades] = useState(true);
@@ -127,7 +126,6 @@ export default function App() {
   const [poolSize, setPoolSize] = useState("");
   const [contingencyPct, setContingencyPct] = useState("10");
   const [branding, setBranding] = useState(loadBranding());
-  const [publishState, setPublishState] = useState("");
   const [session, setSession] = useState<AuthSession | null>(() => loadSession());
   const [pricesLocked, setPricesLocked] = useState(false);
   const [exportsUsed, setExportsUsed] = useState(() => monthlyUsage());
@@ -139,15 +137,75 @@ export default function App() {
     setSession(s);
   }
 
-  // Re-check the plan on load (e.g. Pro expired or was activated on another device).
+  // Re-check the plan on load (e.g. Pro expired, activated or locked on another device).
   useEffect(() => {
     const s = loadSession();
     if (!s) return;
     refreshMe(s).then((user) => {
       if (user) onSession({ ...s, user });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Per-account cloud sync: each user's dashboard (prices, branding, history,
+  // settings) is stored under their own account and restored on login.
+  const cloudReady = useRef(false);
+  useEffect(() => {
+    cloudReady.current = false;
+    if (!session) return;
+    fetch("/api/userdata", { headers: { Authorization: `Bearer ${session.token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (d: {
+          data: {
+            prices?: UnitPrices;
+            custom?: boolean;
+            branding?: { companyName: string; companyPhone: string };
+            history?: SavedEstimate[];
+            adminSettings?: AdminSettings;
+          } | null;
+        } | null) => {
+          const data = d?.data;
+          if (data) {
+            if (data.prices) {
+              const merged = { ...DEFAULT_PRICES, ...data.prices };
+              setPrices(merged);
+              localStorage.setItem(PRICES_KEY, JSON.stringify(merged));
+            }
+            if (data.custom) localStorage.setItem(PRICES_CUSTOM_KEY, "1");
+            if (data.branding) {
+              setBranding(data.branding);
+              localStorage.setItem(BRAND_KEY, JSON.stringify(data.branding));
+            }
+            if (data.history) {
+              setHistory(data.history);
+              localStorage.setItem(HISTORY_KEY, JSON.stringify(data.history));
+            }
+            if (data.adminSettings) {
+              const merged = { ...loadAdminSettings(), ...data.adminSettings };
+              setAdminSettings(merged);
+              saveAdminSettings(merged);
+            }
+          }
+          cloudReady.current = true;
+        },
+      )
+      .catch(() => {
+        cloudReady.current = true;
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.email]);
+
+  useEffect(() => {
+    if (!session || !cloudReady.current || session.user.locked) return;
+    const t = setTimeout(() => {
+      fetch("/api/userdata", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ prices, custom: hasCustomPrices(), branding, history, adminSettings }),
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [prices, branding, history, adminSettings, session]);
 
   useEffect(() => {
     localStorage.setItem(BRAND_KEY, JSON.stringify(branding));
@@ -188,32 +246,6 @@ export default function App() {
     setPrices(marketPrices ? { ...marketPrices } : { ...DEFAULT_PRICES });
   }
 
-  async function publishPrices() {
-    setPublishStatus("Publishing…");
-    try {
-      const url = publishState ? `/api/prices?state=${encodeURIComponent(publishState)}` : "/api/prices";
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
-        body: JSON.stringify(prices),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: string } | null;
-        setPublishStatus(`Failed: ${err?.error ?? res.status}`);
-        return;
-      }
-      const data = (await res.json()) as { prices: UnitPrices; updatedAt: string };
-      setMarketPrices({ ...DEFAULT_PRICES, ...data.prices });
-      setMarketUpdatedAt(data.updatedAt);
-      setPublishStatus(
-        publishState
-          ? `Published for ${publishState} — users in ${publishState} now see these prices.`
-          : "Published — all users now see these prices (national default).",
-      );
-    } catch {
-      setPublishStatus("Failed: network error");
-    }
-  }
 
   const area = parseFloat(floorArea) || 0;
 
@@ -379,6 +411,32 @@ export default function App() {
   const topTrade = result
     ? [...result.trades].sort((a, b) => b.total - a.total)[0]
     : null;
+
+  if (session?.user.locked) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="logo">🏗️</span>
+            <div>
+              <h1>Naija Build Estimator</h1>
+              <p>Construction Cost & BOQ · Nigeria</p>
+            </div>
+          </div>
+        </header>
+        <main className="content">
+          <section className="card">
+            <h2>🔒 Account Locked</h2>
+            <p className="hint">
+              Your subscription payment is pending, so this account is locked. Contact your administrator to renew —
+              once payment is confirmed you'll get an activation code that unlocks the account instantly below.
+            </p>
+          </section>
+          <AccountPanel session={session} onSession={onSession} />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -962,41 +1020,23 @@ export default function App() {
                 />
               </div>
             </div>
-            <div className="admin-box">
-              <h3>🔐 Admin — publish market prices</h3>
-              <p className="hint">
-                With the admin key, publish the prices above as the market default for all users.
-              </p>
-              <div className="field">
-                <label>Publish scope</label>
-                <select value={publishState} onChange={(e) => setPublishState(e.target.value)}>
-                  <option value="">🇳🇬 National (all states)</option>
-                  {STATES.map((s) => (
-                    <option key={s} value={s}>{s} only</option>
-                  ))}
-                </select>
-                <small>State-specific prices override the national set for users in that state.</small>
-              </div>
-              <div className="field">
-                <label>Admin key</label>
-                <input
-                  type="password"
-                  value={adminKey}
-                  onChange={(e) => setAdminKey(e.target.value)}
-                  placeholder="Enter admin key"
-                />
-              </div>
-              <button className="primary" onClick={publishPrices} disabled={!adminKey}>
-                📢 Publish to all users
-              </button>
-              {publishStatus && <p className="hint">{publishStatus}</p>}
-            </div>
           </section>
         )}
 
         {tab === "prices" && <AdminPanel settings={adminSettings} onChange={setAdminSettings} />}
 
-        {tab === "account" && <AccountPanel session={session} onSession={onSession} />}
+        {tab === "account" && (
+          <>
+            <AccountPanel session={session} onSession={onSession} />
+            <SuperAdmin
+              prices={prices}
+              onPublished={(p, updatedAt) => {
+                setMarketPrices({ ...DEFAULT_PRICES, ...p });
+                setMarketUpdatedAt(updatedAt);
+              }}
+            />
+          </>
+        )}
 
         {tab === "history" && (
           <section className="card">

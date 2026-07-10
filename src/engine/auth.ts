@@ -4,6 +4,7 @@ export interface AuthUser {
   email: string;
   plan: "free" | "pro";
   proUntil: string | null;
+  locked?: boolean;
 }
 
 export interface AuthSession {

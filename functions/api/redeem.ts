@@ -21,6 +21,7 @@ export async function onRequestPost(ctx: EventContext): Promise<Response> {
   const base = user.proUntil && new Date(user.proUntil).getTime() > Date.now() ? new Date(user.proUntil) : new Date();
   base.setMonth(base.getMonth() + rec.months);
   user.proUntil = base.toISOString();
+  user.locked = false;
   rec.usedBy = email;
   rec.usedAt = new Date().toISOString();
   await ctx.env.PRICES_KV.put(`user:${email}`, JSON.stringify(user));

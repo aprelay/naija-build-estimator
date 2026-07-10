@@ -13,9 +13,10 @@ import { STATES } from "./engine/data";
 interface Props {
   session: AuthSession | null;
   onSession: (s: AuthSession | null) => void;
+  onProActivated?: () => void;
 }
 
-export default function AccountPanel({ session, onSession }: Props) {
+export default function AccountPanel({ session, onSession, onProActivated }: Props) {
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,6 +27,7 @@ export default function AccountPanel({ session, onSession }: Props) {
   const [businessName, setBusinessName] = useState("");
   const [supplierState, setSupplierState] = useState("Lagos");
   const [whatsapp, setWhatsapp] = useState("");
+  const [showRenew, setShowRenew] = useState(false);
 
   const pro = isProSession(session);
   const used = monthlyUsage();
@@ -62,7 +64,9 @@ export default function AccountPanel({ session, onSession }: Props) {
       const user = await redeemCode(session, code);
       onSession({ ...session, user });
       setCode("");
+      setShowRenew(false);
       setStatus("Code accepted — Pro is active. 🎉");
+      onProActivated?.();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -167,13 +171,22 @@ export default function AccountPanel({ session, onSession }: Props) {
               exports and live market prices — pay by bank transfer, then enter the activation code you receive.
             </p>
           )}
-          <div className="field">
-            <label>Activation code</label>
-            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="NBE-XXXX-XXXX-XXXX" />
-          </div>
-          <button className="primary" onClick={redeem} disabled={busy || !code}>
-            🎟️ Redeem code
-          </button>
+          {(!pro || showRenew) && (
+            <>
+              <div className="field">
+                <label>Activation code</label>
+                <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="NBE-XXXX-XXXX-XXXX" />
+              </div>
+              <button className="primary" onClick={redeem} disabled={busy || !code}>
+                🎟️ Redeem code
+              </button>
+            </>
+          )}
+          {pro && !showRenew && (
+            <button className="secondary" onClick={() => setShowRenew(true)}>
+              🎟️ Have another code?
+            </button>
+          )}
           <button className="secondary" onClick={() => onSession(null)} style={{ marginLeft: 8 }}>
             Log out
           </button>

@@ -1188,7 +1188,7 @@ export default function App() {
 
         {tab === "account" && (
           <>
-            <AccountPanel session={session} onSession={onSession} />
+            <AccountPanel session={session} onSession={onSession} onProActivated={() => setTab("estimate")} />
             {adminMode && (
               <SuperAdmin
                 prices={prices}

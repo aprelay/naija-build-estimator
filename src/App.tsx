@@ -28,6 +28,7 @@ import SuperAdmin from "./SuperAdmin";
 import SupplierPanel from "./SupplierPanel";
 import SuppliersDirectory from "./SuppliersDirectory";
 import {
+  consumeUsage,
   FREE_MONTHLY_LIMIT,
   isProSession,
   loadSession,
@@ -407,6 +408,9 @@ export default function App() {
     if (!file) return;
     setPlanStatus("Reading plan…");
     try {
+      if (!pro && session) {
+        await consumeUsage(session, "upload");
+      }
       const p = await extractPlan(file);
       if (!p.areaSqm && !p.lengthM) {
         setPlanStatus("Couldn't detect an area on the plan — please enter it manually.");
@@ -1015,10 +1019,15 @@ export default function App() {
               <div className="actions">
                 <button
                   className="primary"
-                  onClick={() => {
-                    if (!pro && exportsUsed >= FREE_MONTHLY_LIMIT) {
-                      setTab("account");
-                      return;
+                  onClick={async () => {
+                    if (!pro && session) {
+                      try {
+                        await consumeUsage(session, "export");
+                      } catch (e) {
+                        alert(e instanceof Error ? e.message : "Free plan limit reached — upgrade to Pro.");
+                        setTab("account");
+                        return;
+                      }
                     }
                     exportEstimatePdf(input, result, projectName, {
                       companyName: pro ? branding.companyName : "",

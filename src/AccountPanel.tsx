@@ -76,8 +76,9 @@ export default function AccountPanel({ session, onSession }: Props) {
       {!session && (
         <>
           <p className="hint">
-            Free plan: {FREE_MONTHLY_LIMIT} PDF exports/month (watermarked), default prices. Pro unlocks unlimited
-            branded exports and live monthly market prices per state.
+            Free plan: {FREE_MONTHLY_LIMIT} PDF exports and 2 plan uploads/month (watermarked), default prices. Pro
+            unlocks unlimited branded exports, unlimited plan uploads, live monthly market prices per state and the
+            supplier marketplace.
           </p>
           <div className="block-toggle">
             <button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>

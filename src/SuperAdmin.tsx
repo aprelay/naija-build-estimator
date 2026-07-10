@@ -63,8 +63,9 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
 
   async function userAction(
     email: string,
-    action: "lock" | "unlock" | "extend" | "approve_supplier" | "revoke_supplier",
+    action: "lock" | "unlock" | "extend" | "approve_supplier" | "revoke_supplier" | "delete",
   ) {
+    if (action === "delete" && !confirm(`Permanently delete ${email} and all their data? This cannot be undone.`)) return;
     setStatus("Working…");
     try {
       const res = await fetch("/api/admin/users", {
@@ -82,7 +83,9 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
         `Done — ${email} ${
           action === "extend"
             ? `extended ${extendMonths} month(s)`
-            : action === "approve_supplier"
+            : action === "delete"
+              ? "deleted permanently"
+              : action === "approve_supplier"
               ? "approved as supplier"
               : action === "revoke_supplier"
                 ? "supplier approval revoked"
@@ -226,7 +229,8 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
                     )
                   ) : (
                     <button className="secondary" onClick={() => userAction(u.email, "extend")}>Extend</button>
-                  )}
+                  )}{" "}
+                  <button className="danger" onClick={() => userAction(u.email, "delete")}>Delete</button>
                 </td>
               </tr>
             ))}

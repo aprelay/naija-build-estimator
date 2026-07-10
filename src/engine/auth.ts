@@ -102,6 +102,17 @@ export async function redeemCode(session: AuthSession, code: string): Promise<Au
   return data.user as AuthUser;
 }
 
+export const FREE_UPLOAD_LIMIT = 2;
+
+/**
+ * Server-side usage gate for free accounts: increments the account's monthly
+ * counter and throws if the free-plan limit is reached. Pro is unlimited.
+ */
+export async function consumeUsage(session: AuthSession, kind: "export" | "upload"): Promise<number> {
+  const data = await post("/api/usage", { kind }, session.token);
+  return (data.used as number) ?? 0;
+}
+
 export async function refreshMe(session: AuthSession): Promise<AuthUser | null> {
   try {
     const res = await fetch("/api/auth/me", { headers: { Authorization: `Bearer ${session.token}` } });

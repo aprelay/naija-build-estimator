@@ -31,6 +31,20 @@ export async function onRequestPost(ctx: EventContext): Promise<Response> {
   const user = await getUser(ctx.env.PRICES_KV, email);
   if (!user) return json({ error: "User not found" }, 404);
 
+  if (action === "delete") {
+    const kv = ctx.env.PRICES_KV;
+    if (kv.delete) {
+      await kv.delete(`user:${email}`);
+      await kv.delete(`udata:${email}`);
+      await kv.delete(`slisting:${email}`);
+      if (kv.list) {
+        const { keys } = await kv.list({ prefix: `usage:${email}:` });
+        for (const k of keys) await kv.delete(k.name);
+      }
+    }
+    return json({ deleted: email });
+  }
+
   if (action === "lock") user.locked = true;
   else if (action === "unlock") user.locked = false;
   else if (action === "approve_supplier" || action === "revoke_supplier") {

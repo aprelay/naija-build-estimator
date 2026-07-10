@@ -11,7 +11,14 @@ import {
 } from "../../_lib";
 
 export async function onRequestPost(ctx: EventContext): Promise<Response> {
-  let body: { email?: unknown; password?: unknown };
+  let body: {
+    email?: unknown;
+    password?: unknown;
+    role?: unknown;
+    businessName?: unknown;
+    state?: unknown;
+    whatsapp?: unknown;
+  };
   try {
     body = await ctx.request.json();
   } catch {
@@ -30,6 +37,16 @@ export async function onRequestPost(ctx: EventContext): Promise<Response> {
     proUntil: null,
     createdAt: new Date().toISOString(),
   };
+  if (body.role === "supplier") {
+    const businessName = typeof body.businessName === "string" ? body.businessName.trim().slice(0, 80) : "";
+    const state = typeof body.state === "string" ? body.state.trim().slice(0, 30) : "";
+    const whatsapp = typeof body.whatsapp === "string" ? body.whatsapp.trim().slice(0, 20) : "";
+    if (!businessName || !state || !whatsapp)
+      return json({ error: "Suppliers must provide business name, state and WhatsApp number" }, 400);
+    user.role = "supplier";
+    user.supplierApproved = false;
+    user.supplierProfile = { businessName, state, whatsapp };
+  }
   await ctx.env.PRICES_KV.put(`user:${email}`, JSON.stringify(user));
   const token = await signToken(ctx.env.ADMIN_KEY, email);
   return json({ token, user: publicProfile(user) });

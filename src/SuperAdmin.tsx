@@ -8,6 +8,9 @@ interface AdminUser {
   proUntil: string | null;
   locked: boolean;
   createdAt: string;
+  role: "supplier" | null;
+  supplierApproved: boolean;
+  supplierProfile: { businessName: string; state: string; whatsapp: string } | null;
 }
 
 interface IssuedCode {
@@ -58,7 +61,10 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
     }
   }
 
-  async function userAction(email: string, action: "lock" | "unlock" | "extend") {
+  async function userAction(
+    email: string,
+    action: "lock" | "unlock" | "extend" | "approve_supplier" | "revoke_supplier",
+  ) {
     setStatus("Working…");
     try {
       const res = await fetch("/api/admin/users", {
@@ -72,7 +78,17 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
         return;
       }
       await loadUsers();
-      setStatus(`Done — ${email} ${action === "extend" ? `extended ${extendMonths} month(s)` : `${action}ed`}.`);
+      setStatus(
+        `Done — ${email} ${
+          action === "extend"
+            ? `extended ${extendMonths} month(s)`
+            : action === "approve_supplier"
+              ? "approved as supplier"
+              : action === "revoke_supplier"
+                ? "supplier approval revoked"
+                : `${action}ed`
+        }.`,
+      );
     } catch {
       setStatus("Failed: network error");
     }
@@ -177,10 +193,23 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
           <tbody>
             {users.map((u) => (
               <tr key={u.email}>
-                <td>{u.email}</td>
                 <td>
-                  {u.plan === "pro" ? "Pro ⭐" : "Free"}
-                  {u.proUntil && ` (until ${new Date(u.proUntil).toLocaleDateString("en-NG")})`}
+                  {u.email}
+                  {u.role === "supplier" && u.supplierProfile && (
+                    <div className="hint" style={{ margin: 0 }}>
+                      🏪 {u.supplierProfile.businessName} · {u.supplierProfile.state} · {u.supplierProfile.whatsapp}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  {u.role === "supplier" ? (
+                    <>Supplier {u.supplierApproved ? "✓" : "(pending)"}</>
+                  ) : (
+                    <>
+                      {u.plan === "pro" ? "Pro ⭐" : "Free"}
+                      {u.proUntil && ` (until ${new Date(u.proUntil).toLocaleDateString("en-NG")})`}
+                    </>
+                  )}
                 </td>
                 <td>{u.locked ? "🔒 Locked" : "Active"}</td>
                 <td>
@@ -189,7 +218,15 @@ export default function SuperAdmin({ prices, onPublished }: Props) {
                   ) : (
                     <button className="secondary" onClick={() => userAction(u.email, "lock")}>Lock</button>
                   )}{" "}
-                  <button className="secondary" onClick={() => userAction(u.email, "extend")}>Extend</button>
+                  {u.role === "supplier" ? (
+                    u.supplierApproved ? (
+                      <button className="secondary" onClick={() => userAction(u.email, "revoke_supplier")}>Revoke</button>
+                    ) : (
+                      <button className="secondary" onClick={() => userAction(u.email, "approve_supplier")}>Approve</button>
+                    )
+                  ) : (
+                    <button className="secondary" onClick={() => userAction(u.email, "extend")}>Extend</button>
+                  )}
                 </td>
               </tr>
             ))}

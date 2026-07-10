@@ -25,6 +25,8 @@ import type { AdminSettings } from "./engine/admin";
 import AdminPanel from "./AdminPanel";
 import AccountPanel from "./AccountPanel";
 import SuperAdmin from "./SuperAdmin";
+import SupplierPanel from "./SupplierPanel";
+import SuppliersDirectory from "./SuppliersDirectory";
 import {
   FREE_MONTHLY_LIMIT,
   isProSession,
@@ -480,6 +482,26 @@ export default function App() {
               }}
             />
           )}
+        </main>
+      </div>
+    );
+  }
+
+  if (session && session.user.role === "supplier") {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="logo">🏗️</span>
+            <div>
+              <h1>Naija Build Estimator</h1>
+              <p>Supplier Portal · Nigeria</p>
+            </div>
+          </div>
+        </header>
+        <main className="content">
+          <SupplierPanel session={session} />
+          <AccountPanel session={session} onSession={onSession} />
         </main>
       </div>
     );
@@ -1150,6 +1172,8 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {tab === "prices" && <SuppliersDirectory session={session} pro={pro} />}
 
         {tab === "prices" && <AdminPanel settings={adminSettings} onChange={setAdminSettings} />}
 

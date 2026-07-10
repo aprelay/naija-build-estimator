@@ -23,6 +23,21 @@ export interface UserRecord {
   proUntil: string | null;
   createdAt: string;
   locked?: boolean;
+  role?: "supplier";
+  supplierApproved?: boolean;
+  supplierProfile?: SupplierProfile;
+}
+
+export interface SupplierProfile {
+  businessName: string;
+  state: string;
+  whatsapp: string;
+}
+
+export interface SupplierListing extends SupplierProfile {
+  email: string;
+  items: { material: string; unit: string; price: number }[];
+  updatedAt: string;
 }
 
 export interface CodeRecord {
@@ -112,6 +127,9 @@ export function publicProfile(user: UserRecord) {
     plan: isPro(user) ? "pro" : "free",
     proUntil: user.proUntil,
     locked: !!user.locked,
+    role: user.role ?? null,
+    supplierApproved: !!user.supplierApproved,
+    supplierProfile: user.supplierProfile ?? null,
   };
 }
 

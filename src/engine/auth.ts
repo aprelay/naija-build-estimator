@@ -1,10 +1,19 @@
 // Client-side auth/session + free-tier usage tracking.
 
+export interface SupplierProfile {
+  businessName: string;
+  state: string;
+  whatsapp: string;
+}
+
 export interface AuthUser {
   email: string;
   plan: "free" | "pro";
   proUntil: string | null;
   locked?: boolean;
+  role?: "supplier" | null;
+  supplierApproved?: boolean;
+  supplierProfile?: SupplierProfile | null;
 }
 
 export interface AuthSession {
@@ -70,8 +79,16 @@ async function post(url: string, body: unknown, token?: string): Promise<Record<
   return data;
 }
 
-export async function signup(email: string, password: string): Promise<AuthSession> {
-  const data = await post("/api/auth/signup", { email, password });
+export async function signup(
+  email: string,
+  password: string,
+  supplier?: SupplierProfile,
+): Promise<AuthSession> {
+  const data = await post("/api/auth/signup", {
+    email,
+    password,
+    ...(supplier ? { role: "supplier", ...supplier } : {}),
+  });
   return { token: data.token as string, user: data.user as AuthUser };
 }
 

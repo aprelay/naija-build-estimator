@@ -8,6 +8,7 @@ import {
   signup,
 } from "./engine/auth";
 import type { AuthSession } from "./engine/auth";
+import { STATES } from "./engine/data";
 
 interface Props {
   session: AuthSession | null;
@@ -21,6 +22,10 @@ export default function AccountPanel({ session, onSession }: Props) {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [accountType, setAccountType] = useState<"builder" | "supplier">("builder");
+  const [businessName, setBusinessName] = useState("");
+  const [supplierState, setSupplierState] = useState("Lagos");
+  const [whatsapp, setWhatsapp] = useState("");
 
   const pro = isProSession(session);
   const used = monthlyUsage();
@@ -29,7 +34,16 @@ export default function AccountPanel({ session, onSession }: Props) {
     setBusy(true);
     setStatus("");
     try {
-      const s = mode === "signup" ? await signup(email, password) : await login(email, password);
+      const s =
+        mode === "signup"
+          ? await signup(
+              email,
+              password,
+              accountType === "supplier"
+                ? { businessName, state: supplierState, whatsapp }
+                : undefined,
+            )
+          : await login(email, password);
       onSession(s);
       setPassword("");
       setStatus(mode === "signup" ? "Account created — you're logged in." : "Logged in.");
@@ -73,6 +87,40 @@ export default function AccountPanel({ session, onSession }: Props) {
               Log in
             </button>
           </div>
+          {mode === "signup" && (
+            <div className="field">
+              <label>Account type</label>
+              <select value={accountType} onChange={(e) => setAccountType(e.target.value as "builder" | "supplier")}>
+                <option value="builder">🏗️ Developer / Builder</option>
+                <option value="supplier">🏪 Materials Supplier</option>
+              </select>
+              {accountType === "supplier" && (
+                <small>Suppliers post daily material prices; approved listings are shown to Pro developers.</small>
+              )}
+            </div>
+          )}
+          {mode === "signup" && accountType === "supplier" && (
+            <>
+              <div className="field">
+                <label>Business name</label>
+                <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Mama B Building Materials" />
+              </div>
+              <div className="grid2">
+                <div className="field">
+                  <label>State</label>
+                  <select value={supplierState} onChange={(e) => setSupplierState(e.target.value)}>
+                    {STATES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>WhatsApp number</label>
+                  <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="e.g. 08031234567" />
+                </div>
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Email</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
@@ -86,7 +134,13 @@ export default function AccountPanel({ session, onSession }: Props) {
               placeholder="At least 6 characters"
             />
           </div>
-          <button className="primary" onClick={submit} disabled={busy || !email || !password}>
+          <button
+            className="primary"
+            onClick={submit}
+            disabled={
+              busy || !email || !password || (mode === "signup" && accountType === "supplier" && (!businessName || !whatsapp))
+            }
+          >
             {mode === "signup" ? "Create account" : "Log in"}
           </button>
         </>
@@ -94,11 +148,19 @@ export default function AccountPanel({ session, onSession }: Props) {
       {session && (
         <>
           <p className="hint">
-            Logged in as <strong>{session.user.email}</strong> · Plan:{" "}
-            <strong>{pro ? "Pro ⭐" : "Free"}</strong>
-            {pro && session.user.proUntil && ` (until ${new Date(session.user.proUntil).toLocaleDateString("en-NG")})`}
+            Logged in as <strong>{session.user.email}</strong>
+            {session.user.role === "supplier" ? (
+              <>
+                {" "}· <strong>🏪 Supplier{session.user.supplierApproved ? " ✓ approved" : " (awaiting approval)"}</strong>
+              </>
+            ) : (
+              <>
+                {" "}· Plan: <strong>{pro ? "Pro ⭐" : "Free"}</strong>
+                {pro && session.user.proUntil && ` (until ${new Date(session.user.proUntil).toLocaleDateString("en-NG")})`}
+              </>
+            )}
           </p>
-          {!pro && (
+          {!pro && session.user.role !== "supplier" && (
             <p className="hint">
               {used}/{FREE_MONTHLY_LIMIT} free PDF exports used this month. Upgrade to Pro for unlimited branded
               exports and live market prices — pay by bank transfer, then enter the activation code you receive.

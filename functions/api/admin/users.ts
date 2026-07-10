@@ -33,7 +33,10 @@ export async function onRequestPost(ctx: EventContext): Promise<Response> {
 
   if (action === "lock") user.locked = true;
   else if (action === "unlock") user.locked = false;
-  else if (action === "extend") {
+  else if (action === "approve_supplier" || action === "revoke_supplier") {
+    if (user.role !== "supplier") return json({ error: "Not a supplier account" }, 400);
+    user.supplierApproved = action === "approve_supplier";
+  } else if (action === "extend") {
     const months = typeof body.months === "number" && body.months >= 1 && body.months <= 36 ? Math.round(body.months) : 0;
     if (!months) return json({ error: "months must be 1–36" }, 400);
     const base = user.proUntil && new Date(user.proUntil).getTime() > Date.now() ? new Date(user.proUntil) : new Date();

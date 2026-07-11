@@ -164,6 +164,8 @@ export default function App() {
   const [adminMode, setAdminMode] = useState(() => window.location.hash === "#admin");
   const [pricePopOpen, setPricePopOpen] = useState(false);
   const [pricesSeenAt, setPricesSeenAt] = useState(() => localStorage.getItem("nbe_prices_seen") || "");
+  const [supplierLatestAt, setSupplierLatestAt] = useState("");
+  const [supplierSeenAt, setSupplierSeenAt] = useState(() => localStorage.getItem("nbe_suppliers_seen") || "");
 
   useEffect(() => {
     const onHash = () => setAdminMode(window.location.hash === "#admin");
@@ -276,6 +278,19 @@ export default function App() {
       })
       .catch(() => {});
   }, [state, session]);
+
+  // Track the freshest supplier listing so Pro users get a notification dot on
+  // the Suppliers badge when a supplier posts new prices.
+  useEffect(() => {
+    if (!session || !pro) return;
+    fetch("/api/suppliers", { headers: { Authorization: `Bearer ${session.token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { suppliers?: { updatedAt: string }[] } | null) => {
+        const latest = d?.suppliers?.[0]?.updatedAt || "";
+        if (latest) setSupplierLatestAt(latest);
+      })
+      .catch(() => {});
+  }, [session, pro, tab]);
 
   function editPrice(k: keyof UnitPrices, value: number) {
     localStorage.setItem(PRICES_CUSTOM_KEY, "1");
@@ -557,6 +572,22 @@ export default function App() {
             >
               📈 Prices
               {pricesSeenAt !== marketUpdatedAt && <span className="dot" />}
+            </button>
+          )}
+          {pro && (
+            <button
+              className="price-bell"
+              onClick={() => {
+                setTab("suppliers");
+                setPricePopOpen(false);
+                if (supplierLatestAt) {
+                  setSupplierSeenAt(supplierLatestAt);
+                  localStorage.setItem("nbe_suppliers_seen", supplierLatestAt);
+                }
+              }}
+            >
+              🏪 Suppliers
+              {supplierLatestAt && supplierSeenAt !== supplierLatestAt && <span className="dot" />}
             </button>
           )}
         </div>

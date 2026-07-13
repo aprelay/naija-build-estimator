@@ -6,6 +6,8 @@ import {
   hashPassword,
   isPro,
   normEmail,
+  randomHex,
+  type CodeRecord,
   type EventContext as BaseEventContext,
   type Env as BaseEnv,
   type SupplierListing,
@@ -50,9 +52,13 @@ interface TgParams {
 interface TgSession {
   email?: string;
   supFilter?: string;
+  trialUsed?: boolean;
   p: TgParams;
   prev?: TgParams;
 }
+
+const MAX_LINKED_CHATS = 2;
+const FREE_UPLOADS_PER_MONTH = 2;
 
 const DEFAULT_PARAMS: TgParams = {
   area: null,
@@ -106,6 +112,117 @@ const saveSession = (env: Env, chatId: number, s: TgSession) => env.PRICES_KV.pu
 
 async function linkedUser(env: Env, s: TgSession): Promise<UserRecord | null> {
   return s.email ? getUser(env.PRICES_KV, s.email) : null;
+}
+
+// Anti-sharing: an account can be linked in at most MAX_LINKED_CHATS Telegram
+// chats; linking another kicks the oldest one off (and tells it why).
+async function linkChat(env: Env, email: string, chatId: number) {
+  const key = `tglinks:${email}`;
+  const raw = await env.PRICES_KV.get(key);
+  let links: number[] = [];
+  try {
+    links = raw ? (JSON.parse(raw) as number[]) : [];
+  } catch {
+    links = [];
+  }
+  links = links.filter((c) => c !== chatId);
+  links.push(chatId);
+  while (links.length > MAX_LINKED_CHATS) {
+    const old = links.shift();
+    if (old === undefined) break;
+    const oldS = await loadSession(env, old);
+    if (oldS.email === email) {
+      delete oldS.email;
+      await saveSession(env, old, oldS);
+    }
+    await send(env, old, `⚠️ This account was just linked on another device, so this chat has been unlinked (max ${MAX_LINKED_CHATS} devices per account). Re-link with /link if this device is yours.`);
+  }
+  await env.PRICES_KV.put(key, JSON.stringify(links));
+}
+
+async function unlinkChat(env: Env, email: string, chatId: number) {
+  const key = `tglinks:${email}`;
+  const raw = await env.PRICES_KV.get(key);
+  if (!raw) return;
+  try {
+    const links = (JSON.parse(raw) as number[]).filter((c) => c !== chatId);
+    await env.PRICES_KV.put(key, JSON.stringify(links));
+  } catch {
+    /* ignore */
+  }
+}
+
+const phoneDigits = (v: string) => v.replace(/[^0-9]/g, "").slice(-10);
+
+// Suppliers can log in with the WhatsApp number they registered on the web.
+async function findUserByPhone(env: Env, phone: string): Promise<UserRecord | null> {
+  const target = phoneDigits(phone);
+  if (target.length < 7) return null;
+  const list = await env.PRICES_KV.list?.({ prefix: "user:" });
+  for (const k of list?.keys ?? []) {
+    const raw = await env.PRICES_KV.get(k.name);
+    if (!raw) continue;
+    try {
+      const u = JSON.parse(raw) as UserRecord;
+      if (u.supplierProfile && phoneDigits(u.supplierProfile.whatsapp) === target) return u;
+    } catch {
+      /* skip */
+    }
+  }
+  return null;
+}
+
+const monthKey = () => new Date().toISOString().slice(0, 7);
+
+// Same monthly plan-upload quota the web enforces for free accounts.
+async function consumeUpload(env: Env, email: string): Promise<{ ok: boolean; used: number }> {
+  const key = `usage:${email}:${monthKey()}`;
+  const raw = await env.PRICES_KV.get(key);
+  const usage = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  const used = usage.upload ?? 0;
+  if (used >= FREE_UPLOADS_PER_MONTH) return { ok: false, used };
+  usage.upload = used + 1;
+  await env.PRICES_KV.put(key, JSON.stringify(usage));
+  return { ok: true, used: usage.upload };
+}
+
+const SIGNIN_PROMPT = [
+  "🔐 To keep estimating, connect an account:",
+  "• <code>/link email password</code> — your existing app account (suppliers can use their WhatsApp number instead of email)",
+  "• <code>/redeem NBE-XXXX-XXXX-XXXX email password</code> — activate Pro with a code",
+  "• Or sign up free at https://naija-build-estimator.pages.dev",
+].join("\n");
+
+// Gate for starting a NEW estimate (PDF upload or typed area).
+async function canStartEstimate(env: Env, chatId: number, s: TgSession, isUpload: boolean): Promise<boolean> {
+  if (!s.email) {
+    if (s.trialUsed) {
+      await send(env, chatId, `You've used your free trial estimate.\n\n${SIGNIN_PROMPT}`);
+      return false;
+    }
+    s.trialUsed = true;
+    await send(env, chatId, "🆓 This one's on the house — your free trial estimate. Link an account to keep going (/help).");
+    return true;
+  }
+  const user = await linkedUser(env, s);
+  if (!user) {
+    delete s.email;
+    await send(env, chatId, `That linked account no longer exists.\n\n${SIGNIN_PROMPT}`);
+    return false;
+  }
+  if (user.locked && user.role !== "supplier") {
+    await send(env, chatId, "🔒 Your account is locked — contact your administrator to reactivate it.");
+    return false;
+  }
+  if (isUpload && !isPro(user) && user.role !== "supplier") {
+    const { ok, used } = await consumeUpload(env, user.email);
+    if (!ok) {
+      await send(env, chatId, `🔒 Free plan limit reached (${FREE_UPLOADS_PER_MONTH}/${FREE_UPLOADS_PER_MONTH} plan uploads this month) — upgrade to Pro for unlimited uploads, or type the area in sqm instead.`);
+      return false;
+    }
+    await send(env, chatId, `📄 Plan upload ${used}/${FREE_UPLOADS_PER_MONTH} this month (free plan).`);
+  }
+  return true;
 }
 
 async function marketPrices(env: Env, state: string, pro: boolean): Promise<{ prices: UnitPrices; updatedAt: string | null }> {
@@ -274,6 +391,11 @@ async function handleDocument(env: Env, chatId: number, s: TgSession, doc: { fil
     await send(env, chatId, "That file is too large (max 20 MB). Try exporting just the floor-plan sheets.");
     return;
   }
+  if (!(await canStartEstimate(env, chatId, s, true))) {
+    await saveSession(env, chatId, s);
+    return;
+  }
+  await saveSession(env, chatId, s);
   await send(env, chatId, "📐 Reading your plan…");
   const info = (await tg(env, "getFile", { file_id: doc.file_id })) as { ok?: boolean; result?: { file_path?: string } } | null;
   const path = info?.result?.file_path;
@@ -320,7 +442,9 @@ const WELCOME = [
   "<b>Commands</b>",
   "/estimate — show your current estimate",
   "/suppliers — daily material prices from verified suppliers (Pro)",
-  "/link email password — connect your app account (live market prices)",
+  "/link email password — connect your app account (suppliers: use your WhatsApp number instead of email)",
+  "/redeem NBE-XXXX-XXXX-XXXX email password — activate Pro with a code",
+  "/post material price unit — suppliers: update today's price (e.g. <code>/post Cement 12500 per bag</code>)",
   "/undo — revert your last change",
   "/reset — start a fresh estimate",
 ].join("\n");
@@ -504,42 +628,159 @@ async function handleText(env: Env, chatId: number, s: TgSession, text: string, 
     return;
   }
   if (t.startsWith("/unlink")) {
+    if (s.email) await unlinkChat(env, s.email, chatId);
     delete s.email;
     await saveSession(env, chatId, s);
     await send(env, chatId, "Account unlinked.");
     return;
   }
+  if (t.startsWith("/redeem")) {
+    await tg(env, "deleteMessage", { chat_id: chatId, message_id: messageId });
+    const [, codeRaw, emailRaw, ...pw] = t.split(/\s+/);
+    const code = (codeRaw ?? "").trim().toUpperCase();
+    if (!code) {
+      await send(env, chatId, "Usage: <code>/redeem NBE-XXXX-XXXX-XXXX email password</code>\n(email + password create or upgrade your app account — skip them if you've already linked one)");
+      return;
+    }
+    const raw = await env.PRICES_KV.get(`code:${code}`);
+    const rec = raw ? (JSON.parse(raw) as CodeRecord) : null;
+    if (!rec) {
+      await send(env, chatId, "❌ Invalid activation code.");
+      return;
+    }
+    if (rec.usedBy) {
+      await send(env, chatId, "❌ This code has already been used — codes are strictly one-time.");
+      return;
+    }
+    let user: UserRecord | null = null;
+    if (s.email) {
+      user = await getUser(env.PRICES_KV, s.email);
+    }
+    if (!user) {
+      const email = normEmail(emailRaw);
+      const password = pw.join(" ");
+      if (!email || !password) {
+        await send(env, chatId, "You're not linked yet — include your email and a password:\n<code>/redeem CODE email password</code>\n(creates your app account if it doesn't exist)");
+        return;
+      }
+      user = await getUser(env.PRICES_KV, email);
+      if (user) {
+        if ((await hashPassword(password, user.salt)) !== user.hash) {
+          await send(env, chatId, "❌ An account with that email exists but the password is wrong.");
+          return;
+        }
+      } else {
+        if (password.length < 6) {
+          await send(env, chatId, "Password must be at least 6 characters.");
+          return;
+        }
+        const salt = randomHex(16);
+        user = { email, salt, hash: await hashPassword(password, salt), proUntil: null, createdAt: new Date().toISOString() };
+      }
+    }
+    const base = user.proUntil && new Date(user.proUntil).getTime() > Date.now() ? new Date(user.proUntil) : new Date();
+    base.setMonth(base.getMonth() + rec.months);
+    user.proUntil = base.toISOString();
+    user.locked = false;
+    rec.usedBy = user.email;
+    rec.usedAt = new Date().toISOString();
+    await env.PRICES_KV.put(`user:${user.email}`, JSON.stringify(user));
+    await env.PRICES_KV.put(`code:${code}`, JSON.stringify(rec));
+    s.email = user.email;
+    await saveSession(env, chatId, s);
+    await linkChat(env, user.email, chatId);
+    await send(env, chatId, `🎉 Pro activated for <b>${esc(user.email)}</b> until ${base.toLocaleDateString("en-GB")} — live market prices and the supplier directory are now enabled. The same login works on https://naija-build-estimator.pages.dev`);
+    return;
+  }
+  if (t.startsWith("/post")) {
+    const user = await linkedUser(env, s);
+    if (!user || user.role !== "supplier") {
+      await send(env, chatId, "/post is for supplier accounts — link yours first: <code>/link whatsapp-number password</code>");
+      return;
+    }
+    if (!user.supplierApproved) {
+      await send(env, chatId, "⏳ Your supplier account is awaiting approval — you'll be able to post prices once it's approved.");
+      return;
+    }
+    const m = t.match(/^\/post\s+(.+?)\s+(\d[\d,]*)\s*(.*)$/i);
+    if (!m) {
+      await send(env, chatId, "Usage: <code>/post material price unit</code>\ne.g. <code>/post Cement 12500 per bag</code> or <code>/post Sharp sand 150000 20-tonne trip</code>");
+      return;
+    }
+    const material = m[1].trim();
+    const price = parseInt(m[2].replace(/,/g, ""), 10);
+    const unit = m[3].trim();
+    const lraw = await env.PRICES_KV.get(`slisting:${user.email}`);
+    const listing: SupplierListing = lraw
+      ? (JSON.parse(lraw) as SupplierListing)
+      : { ...user.supplierProfile!, email: user.email, items: [], updatedAt: "" };
+    const existing = listing.items.find((it) => it.material.toLowerCase() === material.toLowerCase());
+    if (existing) {
+      existing.price = price;
+      if (unit) existing.unit = unit;
+    } else {
+      listing.items.push({ material, unit: unit || "per unit", price });
+    }
+    listing.updatedAt = new Date().toISOString();
+    await env.PRICES_KV.put(`slisting:${user.email}`, JSON.stringify(listing));
+    await send(env, chatId, `✅ Published: <b>${esc(material)}</b> — ${formatNaira(price)}${unit ? ` (${esc(unit)})` : ""}\nPro developers see it immediately. Your listing:\n${listing.items.map((it) => `• ${esc(it.material)} (${esc(it.unit)}): ${formatNaira(it.price)}`).join("\n")}`);
+    return;
+  }
+  if (t.startsWith("/mylisting")) {
+    const user = await linkedUser(env, s);
+    if (!user || user.role !== "supplier") {
+      await send(env, chatId, "/mylisting is for supplier accounts — link yours first: <code>/link whatsapp-number password</code>");
+      return;
+    }
+    const lraw = await env.PRICES_KV.get(`slisting:${user.email}`);
+    const listing = lraw ? (JSON.parse(lraw) as SupplierListing) : null;
+    await send(env, chatId, listing?.items.length ? `🏪 <b>Your listing</b> (updated ${new Date(listing.updatedAt).toLocaleDateString("en-GB")})\n${listing.items.map((it) => `• ${esc(it.material)} (${esc(it.unit)}): ${formatNaira(it.price)}`).join("\n")}` : "You haven't posted any prices yet — use <code>/post Cement 12500 per bag</code>");
+    return;
+  }
   if (t.startsWith("/link")) {
     // Delete the message so the password doesn't linger in the chat.
     await tg(env, "deleteMessage", { chat_id: chatId, message_id: messageId });
-    const [, emailRaw, ...pw] = t.split(/\s+/);
-    const email = normEmail(emailRaw);
-    const password = pw.join(" ");
-    if (!email || !password) {
-      await send(env, chatId, "Usage: <code>/link email password</code>");
+    const args = t.split(/\s+/).slice(1);
+    const password = args.pop() ?? "";
+    const idRaw = args.join("");
+    if (!idRaw || !password) {
+      await send(env, chatId, "Usage: <code>/link email password</code>\nSuppliers can use their WhatsApp number: <code>/link 0801234... password</code>");
       return;
     }
-    const user = await getUser(env.PRICES_KV, email);
+    const email = normEmail(idRaw);
+    let user = email ? await getUser(env.PRICES_KV, email) : null;
+    if (!user && /^[+0-9][0-9 ()-]{6,}$/.test(idRaw)) {
+      user = await findUserByPhone(env, idRaw);
+    }
     if (!user || (await hashPassword(password, user.salt)) !== user.hash) {
-      await send(env, chatId, "❌ Incorrect email or password.");
+      await send(env, chatId, "❌ Incorrect email/number or password.");
       return;
     }
-    if (user.locked) {
+    if (user.locked && user.role !== "supplier") {
       await send(env, chatId, "🔒 That account is locked — contact your administrator.");
       return;
     }
-    s.email = email;
+    s.email = user.email;
     await saveSession(env, chatId, s);
+    await linkChat(env, user.email, chatId);
     const pro = isPro(user);
-    await send(
-      env,
-      chatId,
-      `✅ Linked <b>${esc(email)}</b> (${pro ? "Pro ⭐ — live market prices & supplier directory enabled" : "Free plan — upgrade in the app for live prices & suppliers"}).`,
-    );
+    const status =
+      user.role === "supplier"
+        ? user.supplierApproved
+          ? "Supplier ✅ — post today's prices with /post"
+          : "Supplier ⏳ awaiting approval — you can post prices once approved"
+        : pro
+          ? "Pro ⭐ — live market prices & supplier directory enabled"
+          : "Free plan — upgrade in the app for live prices & suppliers";
+    await send(env, chatId, `✅ Linked <b>${esc(user.email)}</b> (${status}).`);
     return;
   }
   const n = parseFloat(t.replace(/,/g, ""));
   if (isFinite(n) && n >= 10 && n <= 100000 && /^[\d,.\s]+$/.test(t)) {
+    if (!(await canStartEstimate(env, chatId, s, false))) {
+      await saveSession(env, chatId, s);
+      return;
+    }
     s.p.area = Math.round(n);
     await saveSession(env, chatId, s);
     await sendEstimate(env, chatId, s);

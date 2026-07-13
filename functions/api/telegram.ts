@@ -147,18 +147,15 @@ function mainKeyboard(p: TgParams) {
   ];
 }
 
-async function estimateText(env: Env, s: TgSession): Promise<string> {
+async function runEstimate(env: Env, s: TgSession) {
   const p = s.p;
-  if (!p.area) {
-    return "Send me a floor-plan PDF, or type the floor area in sqm (e.g. <code>250</code>) to get an estimate.";
-  }
   const user = await linkedUser(env, s);
   const pro = isPro(user);
   const { prices, updatedAt } = await marketPrices(env, p.state, pro);
   const r = computeEstimate({
     buildingType: p.buildingType,
     subtype: p.subtype,
-    floorArea: p.area,
+    floorArea: p.area ?? 0,
     storeys: p.storeys,
     columns: 0,
     state: p.state,
@@ -171,6 +168,15 @@ async function estimateText(env: Env, s: TgSession): Promise<string> {
     siteAddons: p.addons,
     contingencyPct: p.contingencyPct,
   });
+  return { r, pro, updatedAt };
+}
+
+async function estimateText(env: Env, s: TgSession): Promise<string> {
+  const p = s.p;
+  if (!p.area) {
+    return "Send me a floor-plan PDF, or type the floor area in sqm (e.g. <code>250</code>) to get an estimate.";
+  }
+  const { r, pro, updatedAt } = await runEstimate(env, s);
   const soil = STATE_SOIL[p.state];
   const lines = [
     `<b>🏗️ Estimate — ${esc(p.subtype)} · ${p.state}</b>`,
@@ -308,6 +314,7 @@ const WELCOME = [
   "",
   "Then adjust with the buttons — or just tell me in plain English:",
   "<i>“add one more storey” · “remove the pool” · “add borehole and solar” · “change state to Abuja” · “undo”</i>",
+  "Or ask questions: <i>“what's the labour for the roof” · “how many cement bags” · “what's the total”</i>",
   "The estimate recalculates instantly, no need to resend the plan.",
   "",
   "<b>Commands</b>",
@@ -317,6 +324,64 @@ const WELCOME = [
   "/undo — revert your last change",
   "/reset — start a fresh estimate",
 ].join("\n");
+
+const TRADE_WORDS: [RegExp, string][] = [
+  [/roof/, "roofing"],
+  [/excavat|earthwork/, "excavation"],
+  [/concrete|foundation/, "concrete"],
+  [/steel|reinforc|iron rod/, "steel"],
+  [/block|masonry/, "blockwork"],
+  [/timber|formwork|scaffold|wood/, "timber"],
+  [/electric|wiring/, "electrical"],
+  [/plumb|sanitary/, "plumbing"],
+  [/plaster|render/, "plastering"],
+  [/finish|tiling|tile|paint|door|window/, "finishing"],
+  [/external/, "external"],
+  [/pool/, "pool"],
+  [/fenc/, "fencing"],
+  [/water tank|tank stand/, "watertank"],
+  [/borehole/, "addon_borehole"],
+  [/soakaway|septic/, "addon_soakaway"],
+  [/dewater/, "addon_dewatering"],
+  [/solar|inverter/, "addon_solar"],
+  [/genset|generator/, "addon_genset"],
+  [/clearing|levell?ing/, "addon_clearing"],
+];
+
+// Q&A over the current estimate: "what's the labour for the roof", "how many cement bags".
+async function answerQuestion(env: Env, s: TgSession, t: string): Promise<string | null> {
+  if (!s.p.area) return null;
+  const isQ = /\?|^\s*(what|whats|what's|how|which|show|give me|tell me)\b|\b(cost of|price of|breakdown)\b/.test(t);
+  if (!isQ) return null;
+  const { r } = await runEstimate(env, s);
+  const wantLabour = /labou?r|workmanship/.test(t);
+  const wantMaterial = /material/.test(t);
+
+  for (const [re, key] of TRADE_WORDS) {
+    if (!re.test(t)) continue;
+    const trade = r.trades.find((x) => x.key === key);
+    if (!trade) return `That item isn't in your current estimate — add it first (e.g. “add ${key.replace("addon_", "")}”).`;
+    if (wantLabour) return `${trade.icon} <b>${esc(trade.label)}</b> — labour: <b>${formatNaira(trade.labour)}</b>\n(materials ${formatNaira(trade.material)} · total ${formatNaira(trade.total)})`;
+    if (wantMaterial) return `${trade.icon} <b>${esc(trade.label)}</b> — materials: <b>${formatNaira(trade.material)}</b>\n(labour ${formatNaira(trade.labour)} · total ${formatNaira(trade.total)})`;
+    return `${trade.icon} <b>${esc(trade.label)}</b>: <b>${formatNaira(trade.total)}</b>\n• Materials: ${formatNaira(trade.material)}\n• Labour: ${formatNaira(trade.labour)}`;
+  }
+
+  if (/cement/.test(t)) return `🧱 Cement: <b>${r.quantities.cementBags.toLocaleString()} bags</b>`;
+  if (/sand/.test(t)) return `⛰️ Sand: <b>${r.quantities.sandTrips.toLocaleString()} trips</b>`;
+  if (/granite|gravel/.test(t)) return `🪨 Granite: <b>${r.quantities.graniteTrips.toLocaleString()} trips</b>`;
+  if (/transport/.test(t)) return `🚚 Transport: <b>${formatNaira(r.transportTotal)}</b>\n${r.transport.map((x) => `• ${esc(x.item)}: ${x.trips} trips — ${formatNaira(x.cost)}`).join("\n")}`;
+  if (/labou?r/.test(t)) {
+    const total = r.trades.reduce((a, x) => a + x.labour, 0);
+    return `👷 <b>Total labour: ${formatNaira(total)}</b>\n${r.trades.map((x) => `• ${esc(x.label)}: ${formatNaira(x.labour)}`).join("\n")}`;
+  }
+  if (/material/.test(t)) {
+    const total = r.trades.reduce((a, x) => a + x.material, 0);
+    return `🧱 <b>Total materials: ${formatNaira(total)}</b>\n${r.trades.map((x) => `• ${esc(x.label)}: ${formatNaira(x.material)}`).join("\n")}`;
+  }
+  if (/stage|phase|schedule|payment/.test(t)) return `📆 <b>Stage breakdown</b>\n${r.stageBreakdown.map((x) => `• ${esc(x.label)}: ${formatNaira(x.cost)}`).join("\n")}`;
+  if (/total|overall|grand|cost|estimate|price/.test(t)) return `💰 <b>Total: ${formatNaira(r.grandTotal)}</b>\n(works ${formatNaira(r.total)} + ${s.p.contingencyPct}% buffer ${formatNaira(r.contingency)})`;
+  return null;
+}
 
 const NUM_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, another: 1, two: 2, three: 3, four: 4, five: 5 };
 
@@ -479,6 +544,14 @@ async function handleText(env: Env, chatId: number, s: TgSession, text: string, 
     await saveSession(env, chatId, s);
     await sendEstimate(env, chatId, s);
     return;
+  }
+  const lower = t.toLowerCase();
+  if (!/\b(add|remove|change|set|make|undo|revert|increase|reduce)\b/.test(lower)) {
+    const answer = await answerQuestion(env, s, lower);
+    if (answer) {
+      await send(env, chatId, answer);
+      return;
+    }
   }
   const changes = applyNL(t, s);
   if (changes) {

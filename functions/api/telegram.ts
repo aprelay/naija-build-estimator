@@ -51,6 +51,7 @@ interface TgSession {
   email?: string;
   supFilter?: string;
   p: TgParams;
+  prev?: TgParams;
 }
 
 const DEFAULT_PARAMS: TgParams = {
@@ -305,14 +306,109 @@ const WELCOME = [
   "📄 Send a floor-plan <b>PDF</b> — I'll detect the area, floors and pool",
   "🔢 Or just type the floor area in sqm (e.g. <code>250</code>)",
   "",
-  "Then use the buttons to adjust state, storeys, foundation, add-ons — the estimate updates instantly.",
+  "Then adjust with the buttons — or just tell me in plain English:",
+  "<i>“add one more storey” · “remove the pool” · “add borehole and solar” · “change state to Abuja” · “undo”</i>",
+  "The estimate recalculates instantly, no need to resend the plan.",
   "",
   "<b>Commands</b>",
   "/estimate — show your current estimate",
   "/suppliers — daily material prices from verified suppliers (Pro)",
   "/link email password — connect your app account (live market prices)",
+  "/undo — revert your last change",
   "/reset — start a fresh estimate",
 ].join("\n");
+
+const NUM_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, another: 1, two: 2, three: 3, four: 4, five: 5 };
+
+const ADDON_WORDS: [RegExp, string][] = [
+  [/\bborehole\b/, "borehole"],
+  [/\bsoakaway|septic\b/, "soakaway"],
+  [/\bdewater/, "dewatering"],
+  [/\bsolar|inverter\b/, "solar"],
+  [/\bgenset|generator\b/, "genset"],
+  [/\bclearing|clear the site|levell?ing\b/, "clearing"],
+];
+
+// Plain-English edits: "add one more storey", "remove the pool", "change state to Abuja", "undo".
+function applyNL(raw: string, s: TgSession): string[] | null {
+  const t = raw.toLowerCase();
+  const p = s.p;
+  if (/\b(undo|revert|go back|as before|previous)\b/.test(t)) {
+    if (!s.prev) return ["Nothing to undo yet."];
+    s.p = s.prev;
+    delete s.prev;
+    return ["↩️ Reverted to your previous estimate."];
+  }
+  const before: TgParams = { ...p, addons: [...p.addons] };
+  const changes: string[] = [];
+  const removing = /\b(remove|reduce|minus|less|without|no|delete|take (off|out|away))\b/.test(t);
+
+  const abs = t.match(/\b(?:make it|set(?: it)?(?: to)?|change to)\s*(\d+)\s*stor(?:e?ys?|ies)\b/);
+  const rel = t.match(/\b(add|another|extra|one more|increase|plus|remove|reduce|minus|less)\b[^.]*?\b(?:(a|an|one|another|two|three|four|five|\d+)\s+)?(?:more\s+)?(?:stor(?:e?ys?|ies)|floors?)\b/);
+  if (abs) {
+    p.storeys = Math.max(0, Math.min(10, parseInt(abs[1], 10)));
+    changes.push(`🏢 Storeys set to ${p.storeys}`);
+  } else if (rel) {
+    const n = rel[2] ? (NUM_WORDS[rel[2]] ?? (parseInt(rel[2], 10) || 1)) : 1;
+    const sign = /^(remove|reduce|minus|less)$/.test(rel[1]) ? -1 : 1;
+    p.storeys = Math.max(0, Math.min(10, p.storeys + sign * n));
+    changes.push(`🏢 Storeys ${sign > 0 ? "+" : "−"}${n} → now ${p.storeys}`);
+  }
+
+  if (/\bpool\b/.test(t)) {
+    if (removing && !/\b(add|with|include)\b[^.]*pool/.test(t)) {
+      p.poolSize = "";
+      changes.push("🏊 Pool removed");
+    } else {
+      const size = t.match(/\b(small|medium|large)\b/)?.[1] ?? (p.poolSize || "medium");
+      p.poolSize = size;
+      changes.push(`🏊 Pool: ${size}`);
+    }
+  }
+
+  for (const [re, key] of ADDON_WORDS) {
+    if (!re.test(t)) continue;
+    const label = SITE_ADDONS.find((a) => a.key === key)?.label ?? key;
+    if (removing) {
+      if (p.addons.includes(key)) {
+        p.addons = p.addons.filter((k) => k !== key);
+        changes.push(`➖ ${label} removed`);
+      }
+    } else if (!p.addons.includes(key)) {
+      p.addons = [...p.addons, key];
+      changes.push(`➕ ${label} added`);
+    }
+  }
+
+  const cleanText = t.replace(/[^a-z ]/g, " ").replace(/\s+/g, " ");
+  for (const st of STATES) {
+    const full = st.toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+    const names = [full, ...full.split(" ").filter((w) => w.length >= 4 && w !== full)];
+    if (names.some((n) => new RegExp(`\\b${n}\\b`).test(cleanText)) && st !== p.state) {
+      p.state = st;
+      const soil = STATE_SOIL[st];
+      if (soil) p.foundationType = soil.foundation;
+      changes.push(`📍 State: ${st}${soil ? ` (foundation → ${soil.foundation === "strip_pad" ? "strip/pad" : soil.foundation})` : ""}`);
+      break;
+    }
+  }
+
+  const buf = t.match(/\b(?:buffer|contingency)\D{0,12}(\d{1,2})\s*%?/);
+  if (buf) {
+    p.contingencyPct = Math.max(0, Math.min(50, parseInt(buf[1], 10)));
+    changes.push(`🛡️ Buffer: ${p.contingencyPct}%`);
+  }
+
+  const area = t.match(/\b(\d{2,6})\s*(?:sqm|sq\.? ?m|m2|square met)/);
+  if (area) {
+    p.area = parseInt(area[1], 10);
+    changes.push(`📐 Area: ${p.area} sqm`);
+  }
+
+  if (!changes.length) return null;
+  s.prev = before;
+  return changes;
+}
 
 async function handleText(env: Env, chatId: number, s: TgSession, text: string, messageId: number) {
   const t = text.trim();
@@ -324,6 +420,13 @@ async function handleText(env: Env, chatId: number, s: TgSession, text: string, 
     s.p = { ...DEFAULT_PARAMS };
     await saveSession(env, chatId, s);
     await send(env, chatId, "🔄 Fresh estimate — send a floor-plan PDF or type the area in sqm.");
+    return;
+  }
+  if (t.startsWith("/undo")) {
+    const msg = applyNL("undo", s);
+    await saveSession(env, chatId, s);
+    await send(env, chatId, (msg ?? ["Nothing to undo yet."]).join("\n"));
+    if (s.p.area) await sendEstimate(env, chatId, s);
     return;
   }
   if (t.startsWith("/estimate") || t.startsWith("/menu")) {
@@ -371,13 +474,20 @@ async function handleText(env: Env, chatId: number, s: TgSession, text: string, 
     return;
   }
   const n = parseFloat(t.replace(/,/g, ""));
-  if (isFinite(n) && n >= 10 && n <= 100000) {
+  if (isFinite(n) && n >= 10 && n <= 100000 && /^[\d,.\s]+$/.test(t)) {
     s.p.area = Math.round(n);
     await saveSession(env, chatId, s);
     await sendEstimate(env, chatId, s);
     return;
   }
-  await send(env, chatId, "Send a floor-plan PDF, type the floor area in sqm (e.g. <code>250</code>), or /help for commands.");
+  const changes = applyNL(t, s);
+  if (changes) {
+    await saveSession(env, chatId, s);
+    await send(env, chatId, changes.join("\n"));
+    if (s.p.area) await sendEstimate(env, chatId, s);
+    return;
+  }
+  await send(env, chatId, "Send a floor-plan PDF, type the floor area in sqm (e.g. <code>250</code>), tell me an edit like <i>“add one more storey”</i>, or /help for commands.");
 }
 
 function optionMenu(data: string, p: TgParams): { text: string; kb: unknown } | null {

@@ -173,7 +173,7 @@ async function estimateText(env: Env, s: TgSession): Promise<string> {
   const soil = STATE_SOIL[p.state];
   const lines = [
     `<b>🏗️ Estimate — ${esc(p.subtype)} · ${p.state}</b>`,
-    `Floor area ${p.area} sqm × ${p.storeys + 1} floor${p.storeys ? "s" : ""} = ${r.quantities.totalBuiltArea} sqm built`,
+    `${p.area} sqm · ${p.storeys === 0 ? "bungalow" : `${p.storeys} storey${p.storeys > 1 ? "s" : ""}`} · ${r.quantities.totalBuiltArea} sqm built`,
     "",
     `<b>Total: ${formatNaira(r.grandTotal)}</b>`,
     `(works ${formatNaira(r.total)} + ${p.contingencyPct}% buffer ${formatNaira(r.contingency)})`,
